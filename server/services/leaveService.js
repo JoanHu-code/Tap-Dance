@@ -107,6 +107,40 @@ const normalizeReason = (
 }
 
 // ============================================================
+// Date
+// ============================================================
+
+const normalizeOptionalDate = (
+  value,
+  fieldName
+) => {
+  if (!value) {
+    return null
+  }
+
+  const normalized =
+    String(
+      value
+    )
+      .trim()
+
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      normalized
+    )
+  ) {
+    throw createError({
+      statusCode: 400,
+
+      statusMessage:
+        `${fieldName} 必須為 YYYY-MM-DD`,
+    })
+  }
+
+  return normalized
+}
+
+// ============================================================
 // Transaction
 // ============================================================
 
@@ -344,7 +378,7 @@ const requireSessions =
     }
 
     // ========================================================
-    // 一個 Leave Batch 只能一個 Course
+    // 一個 Batch 僅能一個 Course
     // ========================================================
 
     const courseIds =
@@ -425,11 +459,10 @@ const requireEnrollment =
   }
 
 // ============================================================
-// Package
+// Current Package
 //
-// LEAVE 本身不扣堂，
-// 但仍綁定當期 Package，
-// 方便知道這筆請假是哪一期。
+// LEAVE 不扣堂，
+// 但 Attendance 仍需綁一期 Package。
 // ============================================================
 
 const requireCurrentPackage =
@@ -438,7 +471,7 @@ const requireCurrentPackage =
     studentId,
     courseId
   ) => {
-    const packages =
+    const active =
       await sql`
         SELECT
           *
@@ -465,16 +498,10 @@ const requireCurrentPackage =
       `
 
     if (
-      packages.length
+      active.length
     ) {
-      return packages[0]
+      return active[0]
     }
-
-    // ========================================================
-    // 如果剛好滿堂已標 COMPLETED，
-    // 但還沒 Renew，
-    // 請假紀錄仍可以綁最新一期。
-    // ========================================================
 
     const latest =
       await sql`
@@ -518,7 +545,7 @@ const requireCurrentPackage =
   }
 
 // ============================================================
-// 查既有 Attendance
+// Existing Attendance
 // ============================================================
 
 const getExistingAttendance =
@@ -553,7 +580,7 @@ const getExistingAttendance =
   }
 
 // ============================================================
-// 建立 Batch Leave
+// Create Leave Batch
 // ============================================================
 
 export const createLeaveBatch =
@@ -609,7 +636,7 @@ export const createLeaveBatch =
       courseId
     )
 
-    const packageData =
+    const currentPackage =
       await requireCurrentPackage(
         sql,
         studentId,
@@ -619,11 +646,11 @@ export const createLeaveBatch =
     const batchId =
       randomUUID()
 
-    // ========================================================
-    // 先準備每一堂的變更
-    // ========================================================
-
     const items = []
+
+    // ========================================================
+    // 先取得所有原本 Attendance 狀態
+    // ========================================================
 
     for (
       const session of
@@ -636,14 +663,6 @@ export const createLeaveBatch =
           session.id
         )
 
-      // ======================================================
-      // 已取消的紀錄：
-      //
-      // 不直接覆寫。
-      // 先由 Attendance Restore 流程處理，
-      // 避免破壞 original_status。
-      // ======================================================
-
       if (
         existingAttendance
           ?.status ===
@@ -653,14 +672,31 @@ export const createLeaveBatch =
           statusCode: 409,
 
           statusMessage:
-            `${String(session.class_date).slice(0, 10)} 的 Attendance 已取消，請先恢復該紀錄`,
+            `${String(session.class_date).slice(0, 10)} 的 Attendance 已取消，請先恢復`,
         })
       }
 
-      const attendanceId =
+      // ======================================================
+      // 已經 LEAVE：
+      //
+      // 不允許重複建立另外一個 Leave Batch。
+      //
+      // 否則同一堂會出現在兩批請假裡，
+      // 之後 Cancel / Restore 會互相打架。
+      // ======================================================
+
+      if (
         existingAttendance
-          ?.id ||
-        randomUUID()
+          ?.status ===
+        'LEAVE'
+      ) {
+        throw createError({
+          statusCode: 409,
+
+          statusMessage:
+            `${String(session.class_date).slice(0, 10)} 已經是請假狀態`,
+        })
+      }
 
       items.push({
         id:
@@ -668,9 +704,15 @@ export const createLeaveBatch =
 
         session,
 
-        attendanceId,
+        attendanceId:
+          existingAttendance
+            ?.id ||
+          randomUUID(),
 
         existingAttendance,
+
+        attendanceCreatedByLeave:
+          !existingAttendance,
       })
     }
 
@@ -713,7 +755,7 @@ export const createLeaveBatch =
     )
 
     // ========================================================
-    // 每堂 Session
+    // Items
     // ========================================================
 
     for (
@@ -724,11 +766,11 @@ export const createLeaveBatch =
         session,
         existingAttendance,
         attendanceId,
+        attendanceCreatedByLeave,
       } = item
 
       // ======================================================
-      // 原本沒有 Attendance
-      // → 建立 LEAVE
+      // 原本不存在 Attendance
       // ======================================================
 
       if (
@@ -755,7 +797,7 @@ export const createLeaveBatch =
             VALUES (
               ${attendanceId},
               ${studentId},
-              ${packageData.id},
+              ${currentPackage.id},
               ${session.id},
               'LEAVE',
               'NORMAL',
@@ -773,49 +815,36 @@ export const createLeaveBatch =
         )
       } else {
         // ====================================================
-        // 已經是 LEAVE
+        // ATTENDED / ABSENT
+        // ↓
+        // LEAVE
         //
-        // 不需要重複 UPDATE。
+        // package_id / attendance_type 不改。
         // ====================================================
 
-        if (
-          existingAttendance
-            .status !==
-          'LEAVE'
-        ) {
-          // ==================================================
-          // ATTENDED / ABSENT → LEAVE
-          //
-          // package_id 不改。
-          // ==================================================
+        queries.push(
+          sql`
+            UPDATE
+              attendance_records_v2
 
-          queries.push(
-            sql`
-              UPDATE
-                attendance_records_v2
+            SET
+              status =
+                'LEAVE',
 
-              SET
-                status =
-                  'LEAVE',
+              note =
+                ${normalizedReason},
 
-                note =
-                  COALESCE(
-                    ${normalizedReason},
-                    note
-                  ),
+              updated_at =
+                NOW()
 
-                updated_at =
-                  NOW()
+            WHERE
+              id =
+                ${attendanceId}
 
-              WHERE
-                id =
-                  ${attendanceId}
-
-              RETURNING
-                *
-            `
-          )
-        }
+            RETURNING
+              *
+          `
+        )
       }
 
       // ======================================================
@@ -832,6 +861,12 @@ export const createLeaveBatch =
               schedule_id,
               session_id,
               attendance_id,
+
+              previous_attendance_status,
+              previous_attendance_note,
+              previous_attendance_type,
+              attendance_created_by_leave,
+
               created_at,
               updated_at
             )
@@ -843,6 +878,27 @@ export const createLeaveBatch =
             ${session.schedule_id},
             ${session.id},
             ${attendanceId},
+
+            ${
+              existingAttendance
+                ?.status ||
+              null
+            },
+
+            ${
+              existingAttendance
+                ?.note ||
+              null
+            },
+
+            ${
+              existingAttendance
+                ?.attendance_type ||
+              null
+            },
+
+            ${attendanceCreatedByLeave},
+
             NOW(),
             NOW()
           )
@@ -896,7 +952,7 @@ export const createLeaveBatch =
               package_id:
                 existingAttendance
                   ?.package_id ||
-                packageData.id,
+                currentPackage.id,
 
               session_id:
                 session.id,
@@ -917,7 +973,7 @@ export const createLeaveBatch =
             },
 
             note:
-              `批次請假：${courseName} ${String(session.class_date).slice(0, 10)}`,
+              `請假：${courseName} ${String(session.class_date).slice(0, 10)}`,
 
             ...auditMetadata,
           }
@@ -926,7 +982,7 @@ export const createLeaveBatch =
     }
 
     // ========================================================
-    // Batch Audit
+    // Leave Audit
     // ========================================================
 
     queries.push(
@@ -981,32 +1037,26 @@ export const createLeaveBatch =
                 (
                   session
                 ) => {
-                  return (
-                    session.id
-                  )
+                  return session.id
                 }
               ),
           },
 
           note:
-            `建立批次請假，共 ${sessions.length} 堂`,
+            `建立請假，共 ${sessions.length} 堂`,
 
           ...auditMetadata,
         }
       )
     )
 
-    const results =
-      await runTransaction(
-        sql,
-        queries
-      )
+    await runTransaction(
+      sql,
+      queries
+    )
 
     // ========================================================
-    // 如果原本有 ATTENDED 被改 LEAVE，
-    // 需要重算那些 Attendance 原本所屬的 Package。
-    //
-    // 使用 Set 避免同 Package 重算很多次。
+    // Recalculate affected Packages
     // ========================================================
 
     const affectedPackageIds =
@@ -1014,7 +1064,7 @@ export const createLeaveBatch =
 
     affectedPackageIds.add(
       String(
-        packageData.id
+        currentPackage.id
       )
     )
 
@@ -1043,23 +1093,23 @@ export const createLeaveBatch =
       const packageId of
       affectedPackageIds
     ) {
-      const recalculated =
+      const packageData =
         await recalculatePackage(
           sql,
           packageId
         )
 
       if (
-        recalculated
+        packageData
       ) {
         recalculatedPackages.push(
-          recalculated
+          packageData
         )
       }
     }
 
     // ========================================================
-    // 重新查 Batch
+    // Return
     // ========================================================
 
     const batches =
@@ -1104,6 +1154,11 @@ export const createLeaveBatch =
 
           session.end_time,
 
+          schedule.weekday,
+
+          schedule.name
+            AS schedule_name,
+
           attendance.status
             AS attendance_status
 
@@ -1115,6 +1170,12 @@ export const createLeaveBatch =
 
           ON session.id =
             item.session_id
+
+        LEFT JOIN
+          class_schedules schedule
+
+          ON schedule.id =
+            item.schedule_id
 
         LEFT JOIN
           attendance_records_v2 attendance
@@ -1134,7 +1195,6 @@ export const createLeaveBatch =
     return {
       batch:
         batches[0] ||
-        results[0]?.[0] ||
         null,
 
       items:
@@ -1146,7 +1206,7 @@ export const createLeaveBatch =
   }
 
 // ============================================================
-// Teacher 查詢 Leave Batch
+// Get Leave Batches
 // ============================================================
 
 export const getLeaveBatches =
@@ -1160,20 +1220,34 @@ export const getLeaveBatches =
     const sql =
       useDatabase()
 
-    if (
+    const normalizedStudentId =
       studentId
+        ? String(
+            studentId
+          ).trim()
+        : null
+
+    const normalizedCourseId =
+      courseId
+        ? String(
+            courseId
+          ).trim()
+        : null
+
+    if (
+      normalizedStudentId
     ) {
       assertUuid(
-        studentId,
+        normalizedStudentId,
         '學生 ID'
       )
     }
 
     if (
-      courseId
+      normalizedCourseId
     ) {
       assertUuid(
-        courseId,
+        normalizedCourseId,
         'Course ID'
       )
     }
@@ -1203,6 +1277,18 @@ export const getLeaveBatches =
           'Leave status 不正確',
       })
     }
+
+    const normalizedStartDate =
+      normalizeOptionalDate(
+        startDate,
+        '開始日期'
+      )
+
+    const normalizedEndDate =
+      normalizeOptionalDate(
+        endDate,
+        '結束日期'
+      )
 
     const batches =
       await sql`
@@ -1257,21 +1343,21 @@ export const getLeaveBatches =
 
         WHERE
           (
-            ${studentId || null}::uuid
+            ${normalizedStudentId}::uuid
               IS NULL
 
             OR
               batch.student_id =
-                ${studentId || null}
+                ${normalizedStudentId}
           )
 
           AND (
-            ${courseId || null}::uuid
+            ${normalizedCourseId}::uuid
               IS NULL
 
             OR
               batch.course_id =
-                ${courseId || null}
+                ${normalizedCourseId}
           )
 
           AND (
@@ -1284,21 +1370,21 @@ export const getLeaveBatches =
           )
 
           AND (
-            ${startDate || null}::date
+            ${normalizedStartDate}::date
               IS NULL
 
             OR
               batch.created_at::date >=
-                ${startDate || null}
+                ${normalizedStartDate}
           )
 
           AND (
-            ${endDate || null}::date
+            ${normalizedEndDate}::date
               IS NULL
 
             OR
               batch.created_at::date <=
-                ${endDate || null}
+                ${normalizedEndDate}
           )
 
         ORDER BY
