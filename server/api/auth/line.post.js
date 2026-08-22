@@ -8,6 +8,7 @@ const publicUser = (user) => ({
   role: user.role,
 })
 
+
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const idToken = String(body?.idToken || '').trim()
