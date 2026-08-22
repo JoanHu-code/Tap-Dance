@@ -17,80 +17,85 @@ export default defineEventHandler(
       throw createError({
         statusCode: 403,
         statusMessage:
-          '只有老師可以新增課程',
+          '只有老師可以新增課程時段',
       })
     }
 
     const body =
       await readBody(event)
 
-    const name =
+    const courseId =
       String(
-        body?.name || ''
-      ).trim()
+        body?.courseId || ''
+      )
 
-    if (!name) {
+    const weekday =
+      Number(
+        body?.weekday
+      )
+
+    const startTime =
+      String(
+        body?.startTime || ''
+      )
+
+    if (
+      !courseId ||
+      !Number.isInteger(
+        weekday
+      ) ||
+      weekday < 1 ||
+      weekday > 7 ||
+      !startTime
+    ) {
       throw createError({
         statusCode: 400,
         statusMessage:
-          '請輸入課程名稱',
+          '課程時段資料不完整',
       })
     }
 
     const sql =
       useDatabase()
 
-    const organizations =
-      await sql`
-        SELECT
-          organization_id
-
-        FROM organization_members
-
-        WHERE user_id =
-          ${user.id}
-
-        LIMIT 1
-      `
-
-    if (
-      !organizations.length
-    ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          '尚未加入任何教室',
-      })
-    }
-
     const records =
       await sql`
         INSERT INTO
-          dance_courses (
-            organization_id,
+          class_schedules (
+            course_id,
+            teacher_user_id,
+            weekday,
+            start_time,
+            end_time,
             name,
-            description
+            capacity
           )
 
         VALUES (
+          ${courseId},
+          ${user.id},
+          ${weekday},
+          ${startTime},
           ${
-            organizations[0]
-              .organization_id
+            body?.endTime ||
+            null
           },
-          ${name},
           ${
-            body?.description ||
+            body?.name ||
+            null
+          },
+          ${
+            body?.capacity ||
             null
           }
         )
 
-        RETURNING
-          *
+        RETURNING *
       `
 
     return {
       success: true,
-      course:
+      schedule:
         records[0],
     }
   }

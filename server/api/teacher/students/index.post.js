@@ -17,75 +17,74 @@ export default defineEventHandler(
       throw createError({
         statusCode: 403,
         statusMessage:
-          '只有老師可以新增課程時段',
+          '只有老師可以新增學生',
       })
     }
 
     const body =
       await readBody(event)
 
-    const courseId =
+    const name =
       String(
-        body?.courseId || ''
-      )
+        body?.name || ''
+      ).trim()
 
-    const weekday =
-      Number(
-        body?.weekday
-      )
-
-    const startTime =
-      String(
-        body?.startTime || ''
-      )
-
-    if (
-      !courseId ||
-      !Number.isInteger(
-        weekday
-      ) ||
-      weekday < 1 ||
-      weekday > 7 ||
-      !startTime
-    ) {
+    if (!name) {
       throw createError({
         statusCode: 400,
         statusMessage:
-          '課程時段資料不完整',
+          '請輸入學生姓名',
       })
     }
 
     const sql =
       useDatabase()
 
-    const records =
+    const organizations =
+      await sql`
+        SELECT
+          organization_id
+
+        FROM organization_members
+
+        WHERE user_id =
+          ${user.id}
+
+        LIMIT 1
+      `
+
+    if (
+      !organizations.length
+    ) {
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          '老師尚未加入教室',
+      })
+    }
+
+    const students =
       await sql`
         INSERT INTO
-          class_schedules (
-            course_id,
-            teacher_user_id,
-            weekday,
-            start_time,
-            end_time,
+          students (
+            organization_id,
             name,
-            capacity
+            phone,
+            note
           )
 
         VALUES (
-          ${courseId},
-          ${user.id},
-          ${weekday},
-          ${startTime},
           ${
-            body?.endTime ||
+            organizations[0]
+              .organization_id
+          },
+          ${name},
+          ${
+            body?.phone ||
             null
           },
           ${
-            body?.name ||
-            null
-          },
-          ${
-            body?.capacity ||
+            body?.note ||
             null
           }
         )
@@ -95,8 +94,8 @@ export default defineEventHandler(
 
     return {
       success: true,
-      schedule:
-        records[0],
+      student:
+        students[0],
     }
   }
 )
