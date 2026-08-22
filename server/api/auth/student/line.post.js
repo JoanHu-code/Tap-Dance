@@ -1,293 +1,203 @@
+import {
+  createAuthSession,
+} from '../../../utils/authSession.js'
+
+import {
+  useDatabase,
+} from '../../../utils/db.js'
+
+import {
+  resolveLineIdentity,
+} from '../../../services/lineIdentityService.js'
+
 export default defineEventHandler(
-  async (event) => {
+  async (
+    event
+  ) => {
+    // ========================================================
+    // Body
+    // ========================================================
+
     const body =
       await readBody(
         event
       )
 
     const idToken =
-      body?.idToken
+      String(
+        body?.idToken ||
+        ''
+      ).trim()
 
-    if (!idToken) {
+    if (
+      !idToken
+    ) {
       throw createError({
         statusCode: 400,
+
         statusMessage:
           '缺少 LINE ID Token',
       })
     }
 
-    const lineProfile =
-      await verifyLineIdToken(
+    // ========================================================
+    // Student Channel
+    // ========================================================
+
+    const runtimeConfig =
+      useRuntimeConfig()
+
+    const channelId =
+      String(
+        runtimeConfig
+          .studentLineChannelId ||
+        process.env
+          .NUXT_STUDENT_LINE_CHANNEL_ID ||
+        ''
+      ).trim()
+
+    if (
+      !channelId
+    ) {
+      throw createError({
+        statusCode: 500,
+
+        statusMessage:
+          '尚未設定 Student LINE Channel ID',
+      })
+    }
+
+    // ========================================================
+    // Resolve Identity
+    //
+    // Role 永遠是 STUDENT。
+    // ========================================================
+
+    const identity =
+      await resolveLineIdentity({
         idToken,
-        'STUDENT'
-      )
+
+        role:
+          'STUDENT',
+
+        channelId,
+      })
 
     const sql =
       useDatabase()
 
-    let users =
+    // ========================================================
+    // App User
+    // ========================================================
+
+    const users =
       await sql`
         SELECT
           id,
-          line_user_id,
-          display_name,
-          picture_url,
-          role,
-          status
+          role
 
-        FROM app_users
+        FROM
+          app_users
 
         WHERE
-          line_user_id =
-            ${lineProfile.lineUserId}
+          id =
+            ${identity.appUserId}
 
         LIMIT 1
       `
 
-    let user =
-      users[0] ||
-      null
+    if (
+      !users.length
+    ) {
+      throw createError({
+        statusCode: 401,
 
-    if (!user) {
-      const inserted =
-        await sql`
-          INSERT INTO
-            app_users (
-              line_user_id,
-              display_name,
-              picture_url,
-              role,
-              status
-            )
-
-          VALUES (
-            ${lineProfile.lineUserId},
-            ${lineProfile.displayName},
-            ${lineProfile.pictureUrl},
-            'STUDENT',
-            'ACTIVE'
-          )
-
-          RETURNING
-            id,
-            line_user_id,
-            display_name,
-            picture_url,
-            role,
-            status
-        `
-
-      user =
-        inserted[0]
-    } else {
-      if (
-        user.status !==
-        'ACTIVE'
-      ) {
-        throw createError({
-          statusCode: 403,
-          statusMessage:
-            '此學生帳號目前未啟用',
-        })
-      }
-
-      const updated =
-        await sql`
-          UPDATE app_users
-
-          SET
-            display_name =
-              ${lineProfile.displayName},
-
-            picture_url =
-              ${lineProfile.pictureUrl},
-
-            role =
-              'STUDENT',
-
-            status =
-              'ACTIVE'
-
-          WHERE
-            id =
-              ${user.id}
-
-          RETURNING
-            id,
-            line_user_id,
-            display_name,
-            picture_url,
-            role,
-            status
-        `
-
-      user =
-        updated[0]
+        statusMessage:
+          '找不到登入帳號',
+      })
     }
 
-    await createAuthSession(
-      event,
-      user.id
-    )
+    const user =
+      users[0]
+
+    if (
+      user.role !==
+      'STUDENT'
+    ) {
+      throw createError({
+        statusCode: 403,
+
+        statusMessage:
+          '此 LINE 帳號不是學生帳號',
+      })
+    }
+
+    // ========================================================
+    // Student Binding
+    // ========================================================
 
     const students =
       await sql`
         SELECT
-          *
+          id,
 
-        FROM students
+          organization_id,
+
+          name,
+
+          status
+
+        FROM
+          students
 
         WHERE
           user_id =
             ${user.id}
 
-        LIMIT 1
+        LIMIT 2
       `
 
     if (
-      !students.length
+      students.length >
+      1
     ) {
-      return {
-        success: true,
+      throw createError({
+        statusCode: 409,
 
-        role:
-          'STUDENT',
-
-        linked: false,
-
-        user,
-
-        student: null,
-
-        dashboard: {
-          enrollments: [],
-
-          packages: [],
-
-          attendanceRecords:
-            [],
-
-          bankAccount: null,
-        },
-      }
+        statusMessage:
+          '此 LINE 帳號綁定多筆 Student，請聯絡老師處理',
+      })
     }
 
     const student =
-      students[0]
-
-    const enrollments =
-      await sql`
-        SELECT
-          e.*,
-
-          c.name
-            AS course_name,
-
-          s.weekday
-            AS schedule_weekday,
-
-          s.start_time
-            AS schedule_start_time
-
-        FROM
-          student_enrollments e
-
-        LEFT JOIN
-          dance_courses c
-
-          ON c.id =
-            e.course_id
-
-        LEFT JOIN
-          class_schedules s
-
-          ON s.id =
-            e.default_schedule_id
-
-        WHERE
-          e.student_id =
-            ${student.id}
-
-        ORDER BY
-          e.id DESC
-      `
-
-    const packages =
-      await sql`
-        SELECT
-          *
-
-        FROM
-          student_packages
-
-        WHERE
-          student_id =
-            ${student.id}
-
-        ORDER BY
-          id DESC
-
-        LIMIT 30
-      `
-
-    const attendanceRecords =
-      await sql`
-        SELECT
-          *
-
-        FROM
-          attendance_records_v2
-
-        WHERE
-          student_id =
-            ${student.id}
-
-        ORDER BY
-          id DESC
-
-        LIMIT 8
-      `
-
-    const activePackage =
-      packages.find(
-        (
-          item
-        ) => {
-          return (
-            item.status ===
-            'ACTIVE'
-          )
-        }
-      ) ||
-      packages[0] ||
-      null
-
-    let bankAccount =
+      students[0] ||
       null
 
     if (
-      activePackage
-        ?.bank_account_id
+      student &&
+      student.status !==
+        'ACTIVE'
     ) {
-      const bankAccounts =
-        await sql`
-          SELECT
-            *
+      throw createError({
+        statusCode: 403,
 
-          FROM
-            bank_accounts
-
-          WHERE
-            id =
-              ${activePackage.bank_account_id}
-
-          LIMIT 1
-        `
-
-      bankAccount =
-        bankAccounts[0] ||
-        null
+        statusMessage:
+          '學生資料目前未啟用',
+      })
     }
+
+    // ========================================================
+    // Create Session
+    //
+    // 即使 Student 尚未綁定，
+    // STUDENT App User 仍可以登入，
+    // 之後才能進行安全綁定流程。
+    // ========================================================
+
+    await createAuthSession(
+      event,
+      user.id
+    )
 
     return {
       success: true,
@@ -295,21 +205,39 @@ export default defineEventHandler(
       role:
         'STUDENT',
 
-      linked: true,
+      studentBound:
+        Boolean(
+          student
+        ),
 
-      user,
+      student:
+        student
+          ? {
+              id:
+                student.id,
 
-      student,
+              name:
+                student.name,
 
-      dashboard: {
-        enrollments,
+              organizationId:
+                student.organization_id,
+            }
+          : null,
 
-        packages,
+      profile: {
+        name:
+          identity.profile
+            ?.name ||
+          null,
 
-        attendanceRecords,
-
-        bankAccount,
+        picture:
+          identity.profile
+            ?.picture ||
+          null,
       },
+
+      isNewUser:
+        identity.isNewUser,
     }
   }
 )
