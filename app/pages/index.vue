@@ -1,5 +1,14 @@
 <script setup>
 const {
+  user,
+  authenticated,
+  initialized,
+  loading: authLoading,
+  error: authError,
+  initializeLineAuth,
+} = useLineAuth()
+
+const {
   course,
   attendedCount,
   remainingSessions,
@@ -88,11 +97,9 @@ const openConfirmDialog = ({
 
 const handleAttendance = () => {
   openConfirmDialog({
-    type:
-      'ATTENDANCE',
+    type: 'ATTENDANCE',
 
-    title:
-      '確認上課',
+    title: '確認上課',
 
     message:
       '確定要新增今天的上課紀錄嗎？新增後會計入本期堂數。',
@@ -108,11 +115,9 @@ const handleAttendance = () => {
 
 const handleLeave = () => {
   openConfirmDialog({
-    type:
-      'LEAVE',
+    type: 'LEAVE',
 
-    title:
-      '確認請假',
+    title: '確認請假',
 
     message:
       '確定要新增今天的請假紀錄嗎？本次不會計入已上課堂數。',
@@ -129,15 +134,12 @@ const handleLeave = () => {
 const handleCancelRecord = (
   id
 ) => {
-  pendingRecordId.value =
-    id
+  pendingRecordId.value = id
 
   openConfirmDialog({
-    type:
-      'CANCEL_RECORD',
+    type: 'CANCEL_RECORD',
 
-    title:
-      '取消紀錄',
+    title: '取消紀錄',
 
     message:
       '確定要取消這筆紀錄嗎？取消後不會計入堂數，但紀錄仍會保留。當天中午 12:00 後無法取消。',
@@ -145,8 +147,7 @@ const handleCancelRecord = (
     confirmText:
       '確認取消',
 
-    danger:
-      true,
+    danger: true,
   })
 }
 
@@ -234,11 +235,18 @@ const handleCancelConfirm =
   }
 
 // ============================================================
-// 初始化
+// LINE 登入 + 初始化資料
 // ============================================================
 
 onMounted(
   async () => {
+    const loginSuccess =
+      await initializeLineAuth()
+
+    if (!loginSuccess) {
+      return
+    }
+
     await refreshAttendance()
 
     if (error.value) {
@@ -267,25 +275,15 @@ onBeforeUnmount(
 <template>
   <main class="home">
     <div class="home__container">
-      <header class="home__header">
-        <div>
-          <span>
-            Tap Dance
-          </span>
+      <!-- ====================================================
+           LINE 登入中
+           ==================================================== -->
 
-          <h1>
-            課程紀錄
-          </h1>
-        </div>
-
-        <div class="avatar">
-          👞
-        </div>
-      </header>
-
-      <!-- 載入中 -->
       <div
-        v-if="loading"
+        v-if="
+          authLoading ||
+          !initialized
+        "
         class="loading-card"
       >
         <div
@@ -293,52 +291,174 @@ onBeforeUnmount(
         />
 
         <span>
-          資料載入中...
+          正在確認 LINE 登入...
         </span>
       </div>
 
+      <!-- ====================================================
+           尚未授權
+           ==================================================== -->
+
+      <div
+        v-else-if="
+          !authenticated
+        "
+        class="auth-card"
+      >
+        <div
+          class="auth-card__icon"
+        >
+          🔒
+        </div>
+
+        <h2>
+          尚未取得使用權限
+        </h2>
+
+        <p>
+          {{
+            authError ||
+            '請使用 LINE 開啟此課程紀錄。'
+          }}
+        </p>
+
+        <p
+          class="auth-card__hint"
+        >
+          如果這是你第一次登入，
+          系統會先建立待授權帳號，
+          管理者確認後才能使用。
+        </p>
+      </div>
+
+      <!-- ====================================================
+           已登入
+           ==================================================== -->
+
       <template v-else>
-        <!-- 課程進度 -->
-        <CourseProgress
-          :course-name="
-            course.name
-          "
-          :attended-count="
-            attendedCount
-          "
-          :total-sessions="
-            course.totalSessions
-          "
-          :remaining-sessions="
-            remainingSessions
-          "
-          :progress-percentage="
-            progressPercentage
-          "
-          :price="
-            course.price
-          "
-        />
+        <header
+          class="home__header"
+        >
+          <div>
+            <span>
+              Tap Dance
+            </span>
 
-        <!-- 快速操作 -->
-        <CourseQuickActions
-          @attendance="
-            handleAttendance
-          "
-          @leave="
-            handleLeave
-          "
-        />
+            <h1>
+              課程紀錄
+            </h1>
+          </div>
 
-        <!-- 上課 / 已取消 Tab -->
-        <AttendanceList
-          :records="
-            sortedAttendanceRecords
-          "
-          @cancel="
-            handleCancelRecord
-          "
-        />
+          <div
+            class="user"
+          >
+            <img
+              v-if="
+                user?.pictureUrl
+              "
+              :src="
+                user.pictureUrl
+              "
+              :alt="
+                user.displayName ||
+                'LINE 使用者'
+              "
+              class="user__avatar"
+            >
+
+            <div
+              v-else
+              class="
+                user__avatar
+                user__avatar--placeholder
+              "
+            >
+              👤
+            </div>
+
+            <div
+              class="user__info"
+            >
+              <strong>
+                {{
+                  user?.displayName ||
+                  'LINE 使用者'
+                }}
+              </strong>
+
+              <span>
+                {{
+                  user?.role ===
+                  'TEACHER'
+                    ? '老師'
+                    : '學員'
+                }}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        <!-- ================================================
+             課程資料載入中
+             ================================================ -->
+
+        <div
+          v-if="loading"
+          class="loading-card"
+        >
+          <div
+            class="loading-spinner"
+          />
+
+          <span>
+            課程資料載入中...
+          </span>
+        </div>
+
+        <!-- ================================================
+             課程內容
+             ================================================ -->
+
+        <template v-else>
+          <CourseProgress
+            :course-name="
+              course.name
+            "
+            :attended-count="
+              attendedCount
+            "
+            :total-sessions="
+              course.totalSessions
+            "
+            :remaining-sessions="
+              remainingSessions
+            "
+            :progress-percentage="
+              progressPercentage
+            "
+            :price="
+              course.price
+            "
+          />
+
+          <CourseQuickActions
+            @attendance="
+              handleAttendance
+            "
+            @leave="
+              handleLeave
+            "
+          />
+
+          <AttendanceList
+            :records="
+              sortedAttendanceRecords
+            "
+            @cancel="
+              handleCancelRecord
+            "
+          />
+        </template>
       </template>
     </div>
 
@@ -347,7 +467,9 @@ onBeforeUnmount(
          ====================================================== -->
 
     <Teleport to="body">
-      <Transition name="dialog">
+      <Transition
+        name="dialog"
+      >
         <div
           v-if="
             showConfirmDialog
@@ -357,7 +479,9 @@ onBeforeUnmount(
             handleCancelConfirm
           "
         >
-          <div class="dialog">
+          <div
+            class="dialog"
+          >
             <div
               class="dialog__icon"
               :class="{
@@ -442,9 +566,13 @@ onBeforeUnmount(
          Toast
          ====================================================== -->
 
-    <Transition name="toast">
+    <Transition
+      name="toast"
+    >
       <div
-        v-if="showMessage"
+        v-if="
+          showMessage
+        "
         class="toast"
       >
         {{ message }}
@@ -480,10 +608,15 @@ onBeforeUnmount(
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 6px 4px;
 }
 
-.home__header span {
+.home__header > div:first-child {
+  min-width: 0;
+}
+
+.home__header > div:first-child > span {
   color: #999999;
   font-size: 13px;
   letter-spacing: 1px;
@@ -495,17 +628,55 @@ onBeforeUnmount(
   font-size: 25px;
 }
 
-.avatar {
+/* ============================================================
+   LINE User
+   ============================================================ */
+
+.user {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 46px;
+  gap: 10px;
+}
+
+.user__avatar {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  object-fit: cover;
   background: #ffffff;
   border-radius: 50%;
   box-shadow:
-    0 5px 16px
-    rgb(0 0 0 / 5%);
+    0 4px 14px
+    rgb(0 0 0 / 8%);
+}
+
+.user__avatar--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+}
+
+.user__info {
+  display: flex;
+  min-width: 0;
+  max-width: 110px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user__info strong {
+  overflow: hidden;
+  color: #333333;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user__info span {
+  color: #999999;
+  font-size: 11px;
 }
 
 /* ============================================================
@@ -514,7 +685,7 @@ onBeforeUnmount(
 
 .loading-card {
   display: flex;
-  min-height: 160px;
+  min-height: 180px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -539,7 +710,8 @@ onBeforeUnmount(
     #333333;
   border-radius: 50%;
   animation:
-    spin 0.8s
+    spin
+    0.8s
     linear
     infinite;
 }
@@ -549,6 +721,57 @@ onBeforeUnmount(
     transform:
       rotate(360deg);
   }
+}
+
+/* ============================================================
+   未授權
+   ============================================================ */
+
+.auth-card {
+  padding:
+    36px
+    24px;
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow:
+    0 8px 30px
+    rgb(0 0 0 / 5%);
+  text-align: center;
+}
+
+.auth-card__icon {
+  display: flex;
+  width: 58px;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
+  margin:
+    0 auto
+    18px;
+  background: #f5f5f5;
+  border-radius: 18px;
+  font-size: 25px;
+}
+
+.auth-card h2 {
+  margin: 0;
+  color: #222222;
+  font-size: 21px;
+}
+
+.auth-card p {
+  margin:
+    12px
+    0
+    0;
+  color: #666666;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.auth-card__hint {
+  color: #999999 !important;
+  font-size: 12px !important;
 }
 
 /* ============================================================
@@ -624,7 +847,8 @@ onBeforeUnmount(
 .dialog__actions {
   display: grid;
   grid-template-columns:
-    1fr 1fr;
+    1fr
+    1fr;
   gap: 10px;
   margin-top: 24px;
 }
@@ -771,6 +995,15 @@ onBeforeUnmount(
       18px
       14px
       40px;
+  }
+
+  .home__header {
+    align-items:
+      flex-start;
+  }
+
+  .user__info {
+    display: none;
   }
 
   .dialog {
