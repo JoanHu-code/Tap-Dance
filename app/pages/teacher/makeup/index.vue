@@ -14,6 +14,9 @@ const loading =
 const creating =
   ref(false)
 
+const actionLoadingId =
+  ref(null)
+
 const errorMessage =
   ref('')
 
@@ -84,6 +87,23 @@ const showSuccess = (
 }
 
 // ============================================================
+// Error
+// ============================================================
+
+const getErrorMessage = (
+  error,
+  fallback
+) => {
+  return (
+    error?.data
+      ?.statusMessage ||
+    error?.statusMessage ||
+    error?.message ||
+    fallback
+  )
+}
+
+// ============================================================
 // Fetch
 // ============================================================
 
@@ -150,11 +170,10 @@ const fetchMakeups =
       )
 
       errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.statusMessage ||
-        error?.message ||
-        '補課資料載入失敗'
+        getErrorMessage(
+          error,
+          '補課資料載入失敗'
+        )
     } finally {
       loading.value =
         false
@@ -244,17 +263,11 @@ const submitMakeup =
 
       await fetchMakeups()
     } catch (error) {
-      console.error(
-        '補課建立失敗：',
-        error
-      )
-
       errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.statusMessage ||
-        error?.message ||
-        '補課建立失敗'
+        getErrorMessage(
+          error,
+          '補課建立失敗'
+        )
     } finally {
       creating.value =
         false
@@ -262,19 +275,227 @@ const submitMakeup =
   }
 
 // ============================================================
-// 下一批才接 Cancel / Restore
+// Update Note
+// ============================================================
+
+const editMakeupNote =
+  async (
+    makeup
+  ) => {
+    if (
+      actionLoadingId.value
+    ) {
+      return
+    }
+
+    const note =
+      window.prompt(
+        '補課備註：',
+        makeup.note ||
+        ''
+      )
+
+    if (
+      note === null
+    ) {
+      return
+    }
+
+    actionLoadingId.value =
+      makeup.id
+
+    errorMessage.value =
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          `/api/makeups/${makeup.id}`,
+          {
+            method:
+              'PATCH',
+
+            body: {
+              action:
+                'UPDATE_NOTE',
+
+              note:
+                note.trim() ||
+                null,
+            },
+          }
+        )
+
+      showSuccess(
+        response.message ||
+        '補課備註已更新'
+      )
+
+      await fetchMakeups()
+    } catch (error) {
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '補課備註修改失敗'
+        )
+    } finally {
+      actionLoadingId.value =
+        null
+    }
+  }
+
+// ============================================================
+// Cancel
 // ============================================================
 
 const cancelMakeup =
-  () => {
+  async (
+    makeup
+  ) => {
+    if (
+      actionLoadingId.value
+    ) {
+      return
+    }
+
+    if (
+      !window.confirm(
+        `確定要取消 ${makeup.student_name || ''} 的這筆 ${makeup.course_name} 補課嗎？`
+      )
+    ) {
+      return
+    }
+
+    const reason =
+      window.prompt(
+        '取消原因，可留空：',
+        ''
+      )
+
+    if (
+      reason === null
+    ) {
+      return
+    }
+
+    actionLoadingId.value =
+      makeup.id
+
     errorMessage.value =
-      '下一批會接補課取消功能。'
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          `/api/makeups/${makeup.id}`,
+          {
+            method:
+              'PATCH',
+
+            body: {
+              action:
+                'CANCEL',
+
+              reason:
+                reason.trim() ||
+                null,
+            },
+          }
+        )
+
+      showSuccess(
+        response.message ||
+        '補課已取消'
+      )
+
+      await fetchMakeups()
+    } catch (error) {
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '補課取消失敗'
+        )
+    } finally {
+      actionLoadingId.value =
+        null
+    }
   }
 
+// ============================================================
+// Restore
+// ============================================================
+
 const restoreMakeup =
-  () => {
+  async (
+    makeup
+  ) => {
+    if (
+      actionLoadingId.value
+    ) {
+      return
+    }
+
+    if (
+      !window.confirm(
+        `確定恢復這筆 ${makeup.course_name} 補課嗎？恢復後會重新扣回一堂。`
+      )
+    ) {
+      return
+    }
+
+    const reason =
+      window.prompt(
+        '恢復原因，可留空：',
+        ''
+      )
+
+    if (
+      reason === null
+    ) {
+      return
+    }
+
+    actionLoadingId.value =
+      makeup.id
+
     errorMessage.value =
-      '下一批會接補課恢復功能。'
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          `/api/makeups/${makeup.id}`,
+          {
+            method:
+              'PATCH',
+
+            body: {
+              action:
+                'RESTORE',
+
+              reason:
+                reason.trim() ||
+                null,
+            },
+          }
+        )
+
+      showSuccess(
+        response.message ||
+        '補課已恢復'
+      )
+
+      await fetchMakeups()
+    } catch (error) {
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '補課恢復失敗'
+        )
+    } finally {
+      actionLoadingId.value =
+        null
+    }
   }
 
 // ============================================================
@@ -303,10 +524,6 @@ onBeforeUnmount(
 <template>
   <main class="makeup-page">
     <div class="container">
-      <!-- ====================================================
-           Header
-           ==================================================== -->
-
       <header class="page-header">
         <div>
           <NuxtLink
@@ -325,7 +542,7 @@ onBeforeUnmount(
           </h1>
 
           <p>
-            依學生請假紀錄安排同一門課程的補課。
+            安排、取消、恢復學生補課並同步管理堂數。
           </p>
         </div>
 
@@ -340,10 +557,6 @@ onBeforeUnmount(
         </button>
       </header>
 
-      <!-- ====================================================
-           Error
-           ==================================================== -->
-
       <div
         v-if="
           errorMessage
@@ -355,10 +568,6 @@ onBeforeUnmount(
         }}
       </div>
 
-      <!-- ====================================================
-           Summary
-           ==================================================== -->
-
       <section class="summary-grid">
         <article>
           <span>
@@ -366,9 +575,7 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{
-              summary.total
-            }}
+            {{ summary.total }}
           </strong>
         </article>
 
@@ -378,9 +585,7 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{
-              summary.active
-            }}
+            {{ summary.active }}
           </strong>
         </article>
 
@@ -390,16 +595,10 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{
-              summary.cancelled
-            }}
+            {{ summary.cancelled }}
           </strong>
         </article>
       </section>
-
-      <!-- ====================================================
-           Filter
-           ==================================================== -->
 
       <section class="filter-card">
         <select
@@ -422,9 +621,7 @@ onBeforeUnmount(
               student.id
             "
           >
-            {{
-              student.name
-            }}
+            {{ student.name }}
           </option>
         </select>
 
@@ -448,9 +645,7 @@ onBeforeUnmount(
               course.id
             "
           >
-            {{
-              course.name
-            }}
+            {{ course.name }}
           </option>
         </select>
 
@@ -494,10 +689,6 @@ onBeforeUnmount(
         </div>
       </section>
 
-      <!-- ====================================================
-           Records
-           ==================================================== -->
-
       <section class="record-section">
         <div
           v-if="
@@ -528,7 +719,19 @@ onBeforeUnmount(
               true
             "
             :editable="
-              false
+              true
+            "
+            :loading="
+              String(
+                actionLoadingId ||
+                ''
+              ) ===
+                String(
+                  makeup.id
+                )
+            "
+            @edit-note="
+              editMakeupNote
             "
             @cancel="
               cancelMakeup
@@ -547,10 +750,6 @@ onBeforeUnmount(
         </div>
       </section>
     </div>
-
-    <!-- ======================================================
-         Create Dialog
-         ====================================================== -->
 
     <MakeupCreateDialog
       v-model="
@@ -575,10 +774,6 @@ onBeforeUnmount(
         submitMakeup
       "
     />
-
-    <!-- ======================================================
-         Toast
-         ====================================================== -->
 
     <Transition name="toast">
       <div
@@ -609,10 +804,6 @@ onBeforeUnmount(
   margin: 0 auto;
 }
 
-/* ============================================================
-   Header
-   ============================================================ */
-
 .page-header {
   display: flex;
   align-items: flex-end;
@@ -628,9 +819,7 @@ onBeforeUnmount(
   text-decoration: none;
 }
 
-.page-header >
-div >
-span {
+.page-header > div > span {
   color: #999999;
   font-size: 10px;
   letter-spacing: 1px;
@@ -655,10 +844,6 @@ span {
   color: #ffffff;
   font-size: 11px;
 }
-
-/* ============================================================
-   Summary
-   ============================================================ */
 
 .summary-grid {
   display: grid;
@@ -687,10 +872,6 @@ span {
   margin-top: 7px;
   font-size: 21px;
 }
-
-/* ============================================================
-   Filters
-   ============================================================ */
 
 .filter-card {
   display: grid;
@@ -735,10 +916,6 @@ span {
   color: #ffffff;
 }
 
-/* ============================================================
-   Records
-   ============================================================ */
-
 .record-section {
   margin-top: 15px;
 }
@@ -773,10 +950,6 @@ span {
   font-size: 10px;
 }
 
-/* ============================================================
-   Toast
-   ============================================================ */
-
 .toast {
   position: fixed;
   bottom: 25px;
@@ -787,10 +960,7 @@ span {
   border-radius: 999px;
   color: #ffffff;
   font-size: 10px;
-  transform:
-    translateX(
-      -50%
-    );
+  transform: translateX(-50%);
 }
 
 @media (
@@ -816,11 +986,6 @@ span {
 
   .page-header {
     align-items: flex-start;
-  }
-
-  .summary-grid {
-    grid-template-columns:
-      1fr;
   }
 }
 </style>

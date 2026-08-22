@@ -13,7 +13,7 @@ const props =
 
     editable: {
       type: Boolean,
-      default: false,
+      default: true,
     },
 
     loading: {
@@ -24,6 +24,7 @@ const props =
 
 const emit =
   defineEmits([
+    'edit-note',
     'cancel',
     'restore',
   ])
@@ -61,7 +62,7 @@ const formatTime = (
 }
 
 // ============================================================
-// Date Time
+// DateTime
 // ============================================================
 
 const formatDateTime = (
@@ -188,6 +189,20 @@ const creatorLabel =
 // Actions
 // ============================================================
 
+const editNote =
+  () => {
+    if (
+      props.loading
+    ) {
+      return
+    }
+
+    emit(
+      'edit-note',
+      props.makeup
+    )
+  }
+
 const cancelMakeup =
   () => {
     if (
@@ -280,12 +295,10 @@ const restoreMakeup =
     </header>
 
     <!-- ======================================================
-         Route
+         Source → Makeup
          ====================================================== -->
 
     <div class="makeup-route">
-      <!-- Source -->
-
       <div class="route-item">
         <span class="route-label">
           原請假
@@ -322,8 +335,6 @@ const restoreMakeup =
       <div class="route-arrow">
         ↓
       </div>
-
-      <!-- Makeup -->
 
       <div
         class="
@@ -399,20 +410,43 @@ const restoreMakeup =
          Note
          ====================================================== -->
 
-    <div
-      v-if="
-        makeup.note
-      "
-      class="note"
-    >
-      <span>
-        備註
-      </span>
+    <div class="note">
+      <div class="note-header">
+        <span>
+          備註
+        </span>
 
-      <p>
+        <button
+          v-if="
+            editable
+          "
+          type="button"
+          :disabled="
+            loading
+          "
+          @click="
+            editNote
+          "
+        >
+          修改
+        </button>
+      </div>
+
+      <p
+        v-if="
+          makeup.note
+        "
+      >
         {{
           makeup.note
         }}
+      </p>
+
+      <p
+        v-else
+        class="empty-note"
+      >
+        未填寫備註
       </p>
     </div>
 
@@ -421,21 +455,37 @@ const restoreMakeup =
          ====================================================== -->
 
     <footer class="card-footer">
+      <div>
+        <span
+          v-if="
+            makeup.created_by_role
+          "
+        >
+          建立：
+          {{
+            creatorLabel
+          }}
+        </span>
+
+        <span>
+          {{
+            formatDateTime(
+              makeup.created_at
+            )
+          }}
+        </span>
+      </div>
+
       <span
         v-if="
-          makeup.created_by_role
+          isCancelled &&
+          makeup.cancelled_at
         "
       >
-        建立：
-        {{
-          creatorLabel
-        }}
-      </span>
-
-      <span>
+        取消：
         {{
           formatDateTime(
-            makeup.created_at
+            makeup.cancelled_at
           )
         }}
       </span>
@@ -443,7 +493,6 @@ const restoreMakeup =
 
     <!-- ======================================================
          Actions
-         下一批接 Cancel / Restore API 後即可直接使用
          ====================================================== -->
 
     <div
@@ -503,7 +552,6 @@ const restoreMakeup =
 
 .makeup-card--cancelled {
   background: #fafafa;
-  opacity: 0.7;
 }
 
 /* ============================================================
@@ -595,7 +643,6 @@ const restoreMakeup =
 .route-arrow {
   padding: 7px 0;
   color: #aaaaaa;
-  font-size: 12px;
   text-align: center;
 }
 
@@ -605,7 +652,6 @@ const restoreMakeup =
 
 .attendance-row {
   display: flex;
-  align-items: center;
   justify-content: space-between;
   margin-top: 12px;
   padding: 10px;
@@ -627,19 +673,41 @@ const restoreMakeup =
    ============================================================ */
 
 .note {
-  margin-top: 10px;
+  margin-top: 11px;
+  padding: 10px;
+  background: #f7f7f7;
+  border-radius: 10px;
 }
 
-.note span {
+.note-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.note-header span {
   color: #999999;
   font-size: 8px;
 }
 
+.note-header button {
+  min-height: 25px;
+  padding: 0 8px;
+  border: 0;
+  background: #ffffff;
+  border-radius: 7px;
+  font-size: 8px;
+}
+
 .note p {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   color: #666666;
   font-size: 10px;
   line-height: 1.6;
+}
+
+.note .empty-note {
+  color: #aaaaaa;
 }
 
 /* ============================================================
@@ -655,6 +723,12 @@ const restoreMakeup =
   border-top: 1px solid #eeeeee;
   color: #aaaaaa;
   font-size: 8px;
+}
+
+.card-footer > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 /* ============================================================
@@ -683,5 +757,9 @@ const restoreMakeup =
 .restore-button {
   background: #222222;
   color: #ffffff;
+}
+
+button:disabled {
+  opacity: 0.5;
 }
 </style>
