@@ -1,5 +1,5 @@
 <script setup>
-defineProps({
+const props = defineProps({
   records: {
     type: Array,
     default: () => [],
@@ -9,6 +9,38 @@ defineProps({
 const emit = defineEmits([
   'cancel',
 ])
+
+// ============================================================
+// Tab
+// ============================================================
+
+const activeTab = ref('ACTIVE')
+
+const activeRecords = computed(() => {
+  return props.records.filter(
+    (record) =>
+      record.status !== 'CANCELLED'
+  )
+})
+
+const cancelledRecords = computed(() => {
+  return props.records.filter(
+    (record) =>
+      record.status === 'CANCELLED'
+  )
+})
+
+const displayRecords = computed(() => {
+  if (activeTab.value === 'CANCELLED') {
+    return cancelledRecords.value
+  }
+
+  return activeRecords.value
+})
+
+// ============================================================
+// 狀態
+// ============================================================
 
 const getStatusText = (status) => {
   const statusMap = {
@@ -39,6 +71,10 @@ const getStatusIcon = (status) => {
   return iconMap[status] || '•'
 }
 
+// ============================================================
+// 日期
+// ============================================================
+
 const formatDate = (dateString) => {
   return new Intl.DateTimeFormat(
     'zh-TW',
@@ -58,19 +94,57 @@ const formatDate = (dateString) => {
 <template>
   <section class="attendance">
     <div class="attendance__header">
-      <h2>最近紀錄</h2>
-
-      <span>
-        {{ records.length }} 筆
-      </span>
+      <h2>
+        最近紀錄
+      </h2>
     </div>
 
+    <!-- Tab -->
+    <div class="attendance-tabs">
+      <button
+        type="button"
+        class="attendance-tab"
+        :class="{
+          'attendance-tab--active':
+            activeTab === 'ACTIVE',
+        }"
+        @click="activeTab = 'ACTIVE'"
+      >
+        <span>
+          上課紀錄
+        </span>
+
+        <span class="attendance-tab__count">
+          {{ activeRecords.length }}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        class="attendance-tab"
+        :class="{
+          'attendance-tab--active':
+            activeTab === 'CANCELLED',
+        }"
+        @click="activeTab = 'CANCELLED'"
+      >
+        <span>
+          已取消
+        </span>
+
+        <span class="attendance-tab__count">
+          {{ cancelledRecords.length }}
+        </span>
+      </button>
+    </div>
+
+    <!-- 紀錄 -->
     <div
-      v-if="records.length"
+      v-if="displayRecords.length"
       class="attendance__list"
     >
       <div
-        v-for="record in records"
+        v-for="record in displayRecords"
         :key="record.id"
         class="attendance-item"
         :class="{
@@ -79,11 +153,23 @@ const formatDate = (dateString) => {
         }"
       >
         <div class="attendance-item__status">
-          <div class="attendance-item__icon">
+          <div
+            class="attendance-item__icon"
+            :class="{
+              'attendance-item__icon--attended':
+                record.status === 'ATTENDED',
+
+              'attendance-item__icon--leave':
+                record.status === 'LEAVE',
+
+              'attendance-item__icon--cancelled':
+                record.status === 'CANCELLED',
+            }"
+          >
             {{ getStatusIcon(record.status) }}
           </div>
 
-          <div>
+          <div class="attendance-item__info">
             <strong>
               {{ getStatusText(record.status) }}
             </strong>
@@ -110,7 +196,9 @@ const formatDate = (dateString) => {
 
         <div class="attendance-item__right">
           <template
-            v-if="record.status !== 'CANCELLED'"
+            v-if="
+              record.status !== 'CANCELLED'
+            "
           >
             <span
               v-if="record.confirmed"
@@ -127,8 +215,14 @@ const formatDate = (dateString) => {
             </span>
 
             <button
+              type="button"
               class="cancel-button"
-              @click="emit('cancel', record.id)"
+              @click="
+                emit(
+                  'cancel',
+                  record.id
+                )
+              "
             >
               取消
             </button>
@@ -144,11 +238,22 @@ const formatDate = (dateString) => {
       </div>
     </div>
 
+    <!-- 空資料 -->
     <div
       v-else
       class="attendance__empty"
     >
-      還沒有任何上課紀錄
+      <template
+        v-if="
+          activeTab === 'ACTIVE'
+        "
+      >
+        還沒有上課或請假紀錄
+      </template>
+
+      <template v-else>
+        目前沒有已取消的紀錄
+      </template>
     </div>
   </section>
 </template>
@@ -158,7 +263,9 @@ const formatDate = (dateString) => {
   padding: 22px;
   background: #ffffff;
   border-radius: 24px;
-  box-shadow: 0 8px 30px rgb(0 0 0 / 5%);
+  box-shadow:
+    0 8px 30px
+    rgb(0 0 0 / 5%);
 }
 
 .attendance__header {
@@ -172,13 +279,74 @@ const formatDate = (dateString) => {
   font-size: 18px;
 }
 
-.attendance__header > span {
-  color: #999999;
-  font-size: 13px;
+/* ============================================================
+   Tabs
+   ============================================================ */
+
+.attendance-tabs {
+  display: grid;
+  grid-template-columns:
+    1fr 1fr;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 5px;
+  background: #f5f5f5;
+  border-radius: 14px;
 }
 
+.attendance-tab {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  color: #888888;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.attendance-tab--active {
+  background: #ffffff;
+  color: #222222;
+  box-shadow:
+    0 2px 8px
+    rgb(0 0 0 / 6%);
+}
+
+.attendance-tab__count {
+  display: flex;
+  min-width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  background: #eeeeee;
+  border-radius: 999px;
+  color: #777777;
+  font-size: 11px;
+}
+
+.attendance-tab--active
+.attendance-tab__count {
+  background: #222222;
+  color: #ffffff;
+}
+
+/* ============================================================
+   List
+   ============================================================ */
+
 .attendance__list {
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .attendance-item {
@@ -187,7 +355,8 @@ const formatDate = (dateString) => {
   justify-content: space-between;
   gap: 12px;
   padding: 15px 0;
-  border-bottom: 1px solid #eeeeee;
+  border-bottom:
+    1px solid #eeeeee;
 }
 
 .attendance-item:last-child {
@@ -195,11 +364,12 @@ const formatDate = (dateString) => {
 }
 
 .attendance-item--cancelled {
-  opacity: 0.55;
+  opacity: 0.65;
 }
 
 .attendance-item__status {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 12px;
 }
@@ -213,16 +383,37 @@ const formatDate = (dateString) => {
   height: 40px;
   background: #f3f3f3;
   border-radius: 14px;
+  font-weight: 700;
 }
 
-.attendance-item__status > div:last-child {
+.attendance-item__icon--attended {
+  background: #eaf8ee;
+  color: #378a4a;
+}
+
+.attendance-item__icon--leave {
+  background: #fff7e8;
+}
+
+.attendance-item__icon--cancelled {
+  background: #f1f1f1;
+  color: #999999;
+}
+
+.attendance-item__info {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 3px;
 }
 
-.attendance-item__status span,
-.attendance-item__status small {
+.attendance-item__info strong {
+  color: #333333;
+  font-size: 14px;
+}
+
+.attendance-item__info span,
+.attendance-item__info small {
   color: #999999;
   font-size: 12px;
 }
@@ -257,11 +448,43 @@ const formatDate = (dateString) => {
   color: #777777;
   font-size: 12px;
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
+.cancel-button:hover {
+  background: #eeeeee;
+  color: #444444;
+}
+
+.cancel-button:active {
+  transform:
+    scale(0.96);
+}
+
+/* ============================================================
+   Empty
+   ============================================================ */
+
 .attendance__empty {
-  padding: 32px 0;
+  padding: 36px 0 24px;
   color: #aaaaaa;
+  font-size: 13px;
   text-align: center;
+}
+
+@media (
+  max-width: 480px
+) {
+  .attendance-item {
+    align-items: flex-start;
+  }
+
+  .attendance-item__right {
+    flex-direction: column;
+    align-items: flex-end;
+  }
 }
 </style>
