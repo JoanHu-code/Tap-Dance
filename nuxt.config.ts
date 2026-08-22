@@ -6,15 +6,14 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
     modules: ["@pinia/nuxt"],
   imports: {
-    dirs: ["stores", 'composables'],
+    dirs: ["stores"],
   },
  runtimeConfig: {
     lineChannelId: '',
 
     public: {
-      teacherLiffId: '',
-      studentLiffId: '',
-      liffId: '',
+      teacherLineChannelId: '',
+      studentLineChannelId: '',
     },
   },
     app: {
