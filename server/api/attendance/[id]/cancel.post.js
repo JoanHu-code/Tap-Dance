@@ -1,6 +1,6 @@
 import {
-  cancelAttendanceRecord,
-} from '../../../services/attendanceService.js'
+  cancelAttendance,
+} from '../../../services/attendanceMutationService.js'
 
 import {
   requireAuth,
@@ -40,10 +40,20 @@ export default defineEventHandler(
     // ========================================================
 
     try {
+      const result =
+        await cancelAttendance({
+          attendanceId:
+            id,
+
+          actorUserId:
+            user.id,
+
+          actorRole:
+            user.role,
+        })
+
       const record =
-        await cancelAttendanceRecord(
-          id
-        )
+        result.attendance
 
       console.log(
         '取消上課紀錄：',
