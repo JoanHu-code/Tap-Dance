@@ -41,26 +41,11 @@ export default defineEventHandler(
     }
 
     // ========================================================
-    // Teacher Channel
+    // Teacher LINE Channel
     // ========================================================
 
     const runtimeConfig =
       useRuntimeConfig()
-
-    // LIFF ID 的格式是 <Channel ID>-<LIFF app ID>。
-    // Channel ID 本身不是密鑰；此備援可避免部署環境只設定
-    // NUXT_PUBLIC_TEACHER_LIFF_ID 時，登入驗證直接失敗。
-    const liffChannelId =
-      String(
-        runtimeConfig
-          .public
-          ?.teacherLiffId ||
-        ''
-      )
-        .trim()
-        .split(
-          '-'
-        )[0]
 
     const channelId =
       String(
@@ -68,7 +53,6 @@ export default defineEventHandler(
           .teacherLineChannelId ||
         process.env
           .NUXT_TEACHER_LINE_CHANNEL_ID ||
-        liffChannelId ||
         ''
       ).trim()
 
@@ -84,9 +68,10 @@ export default defineEventHandler(
     }
 
     // ========================================================
-    // Resolve
+    // Resolve LINE Identity
     //
-    // Role 永遠由 Server 決定。
+    // Teacher API 的 Role 永遠由 Server 固定為 TEACHER。
+    // 不接受前端傳 role。
     // ========================================================
 
     const identity =
@@ -103,9 +88,7 @@ export default defineEventHandler(
       useDatabase()
 
     // ========================================================
-    // 再次確認 App User
-    //
-    // 絕不 UPDATE role。
+    // App User
     // ========================================================
 
     const users =
@@ -131,12 +114,19 @@ export default defineEventHandler(
         statusCode: 401,
 
         statusMessage:
-          '找不到登入帳號',
+          '找不到老師帳號',
       })
     }
 
     const user =
       users[0]
+
+    // ========================================================
+    // Teacher Role
+    //
+    // 唯一老師只要角色是 TEACHER 即可。
+    // 不再檢查 organizations / organization_members。
+    // ========================================================
 
     if (
       user.role !==
@@ -151,57 +141,7 @@ export default defineEventHandler(
     }
 
     // ========================================================
-    // Teacher Organization
-    //
-    // Teacher 新帳號不能只是登入成功，
-    // 必須已被加入 organization_members。
-    //
-    // 目前只有一位老師，
-    // 建議第一位老師由 DB / Seed 建立 membership。
-    // ========================================================
-
-    const memberships =
-      await sql`
-        SELECT
-          organization_id
-
-        FROM
-          organization_members
-
-        WHERE
-          user_id =
-            ${user.id}
-
-        LIMIT 2
-      `
-
-    if (
-      !memberships.length
-    ) {
-      throw createError({
-        statusCode: 403,
-
-        statusMessage:
-          '老師帳號尚未被授權加入 Organization',
-      })
-    }
-
-    if (
-      memberships.length >
-      1
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          '老師屬於多個 Organization，目前無法判斷工作空間',
-      })
-    }
-
-    // ========================================================
-    // Session
-    //
-    // 這裡沿用既有 authSession。
+    // Create TapLife Session
     // ========================================================
 
     await createAuthSession(
@@ -214,10 +154,6 @@ export default defineEventHandler(
 
       role:
         'TEACHER',
-
-      organizationId:
-        memberships[0]
-          .organization_id,
 
       profile: {
         name:
@@ -233,6 +169,9 @@ export default defineEventHandler(
 
       isNewUser:
         identity.isNewUser,
+
+      isNewIdentity:
+        identity.isNewIdentity,
     }
   }
 )
