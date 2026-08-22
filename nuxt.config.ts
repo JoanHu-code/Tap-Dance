@@ -9,11 +9,13 @@ export default defineNuxtConfig({
     dirs: ["stores"],
   },
  runtimeConfig: {
-    lineChannelId: '',
+    teacherLineChannelId: '',
+
+    studentLineChannelId: '',
 
     public: {
-      teacherLineChannelId: '',
-      studentLineChannelId: '',
+      teacherLiffId: '',
+      studentLiffId: '',
     },
   },
     app: {

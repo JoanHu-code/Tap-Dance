@@ -14,6 +14,14 @@ const loading =
 const errorMessage =
   ref('')
 
+const authStore =
+  useAuthStore()
+
+const {
+  $liff,
+} =
+  useNuxtApp()
+
 const dashboard =
   ref({
     today: '',
@@ -252,12 +260,110 @@ const fetchDashboard =
   }
 
 // ============================================================
+// LIFF Login
+//
+// 將 LINE 的 LIFF 登入轉換成後端的 httpOnly Session Cookie。
+// ============================================================
+
+const authenticate =
+  async () => {
+    const existingSession =
+      await authStore
+        .fetchStudentMe({
+          force: true,
+        })
+
+    if (
+      existingSession
+        ?.success
+    ) {
+      return true
+    }
+
+    const loggedIn =
+      await $liff
+        .login(
+          'STUDENT'
+        )
+
+    if (!loggedIn) {
+      return false
+    }
+
+    const idToken =
+      await $liff
+        .getIdToken(
+          'STUDENT'
+        )
+
+    if (!idToken) {
+      throw new Error(
+        '無法取得 LINE 登入憑證，請重新開啟學生入口。'
+      )
+    }
+
+    await $fetch(
+      '/api/auth/student/line',
+      {
+        method: 'POST',
+
+        body: {
+          idToken,
+        },
+      }
+    )
+
+    const session =
+      await authStore
+        .fetchStudentMe({
+          force: true,
+        })
+
+    if (
+      !session?.success
+    ) {
+      throw new Error(
+        '登入 Session 建立失敗，請重新開啟學生入口。'
+      )
+    }
+
+    return true
+  }
+
+// ============================================================
 // Lifecycle
 // ============================================================
 
 onMounted(
   async () => {
-    await fetchDashboard()
+    loading.value =
+      true
+
+    errorMessage.value =
+      ''
+
+    try {
+      if (
+        await authenticate()
+      ) {
+        await fetchDashboard()
+      }
+    } catch (error) {
+      console.error(
+        'Student LIFF 登入失敗：',
+        error
+      )
+
+      errorMessage.value =
+        error?.data
+          ?.statusMessage ||
+        error?.statusMessage ||
+        error?.message ||
+        'LINE 登入失敗，請重新開啟學生入口。'
+
+      loading.value =
+        false
+    }
   }
 )
 </script>
