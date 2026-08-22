@@ -3,23 +3,17 @@ import {
 } from '../../../utils/db.js'
 
 import {
-  requireAuth,
-} from '../../../utils/authSession.js'
+  requireTeacherOrganization,
+} from '../../../utils/teacherAuth.js'
 
 export default defineEventHandler(
   async (event) => {
-    const user =
-      await requireAuth(event)
-
-    if (
-      user.role !== 'TEACHER'
-    ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          '只有老師可以新增課程',
-      })
-    }
+    const {
+      organization,
+    } =
+      await requireTeacherOrganization(
+        event
+      )
 
     const body =
       await readBody(event)
@@ -27,6 +21,11 @@ export default defineEventHandler(
     const name =
       String(
         body?.name || ''
+      ).trim()
+
+    const description =
+      String(
+        body?.description || ''
       ).trim()
 
     if (!name) {
@@ -37,61 +36,103 @@ export default defineEventHandler(
       })
     }
 
+    if (
+      name.length > 150
+    ) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          '課程名稱不可超過 150 個字',
+      })
+    }
+
     const sql =
       useDatabase()
 
-    const organizations =
+    const duplicated =
       await sql`
-        SELECT
-          organization_id
+        SELECT id
 
-        FROM organization_members
+        FROM dance_courses
 
-        WHERE user_id =
-          ${user.id}
+        WHERE
+          organization_id =
+            ${organization.id}
+
+          AND LOWER(name) =
+            LOWER(${name})
 
         LIMIT 1
       `
 
     if (
-      !organizations.length
+      duplicated.length
     ) {
       throw createError({
-        statusCode: 403,
+        statusCode: 409,
         statusMessage:
-          '尚未加入任何教室',
+          '已經有相同名稱的課程',
       })
     }
 
-    const records =
+    const courses =
       await sql`
         INSERT INTO
           dance_courses (
             organization_id,
             name,
-            description
+            description,
+            status
           )
 
         VALUES (
-          ${
-            organizations[0]
-              .organization_id
-          },
+          ${organization.id},
           ${name},
           ${
-            body?.description ||
+            description ||
             null
-          }
+          },
+          'ACTIVE'
         )
 
         RETURNING
-          *
+          id,
+          name,
+          description,
+          status,
+          created_at
       `
+
+    const course =
+      courses[0]
 
     return {
       success: true,
-      course:
-        records[0],
+
+      message:
+        '課程已新增',
+
+      course: {
+        id:
+          course.id,
+
+        name:
+          course.name,
+
+        description:
+          course.description,
+
+        status:
+          course.status,
+
+        scheduleCount:
+          0,
+
+        schedules: [],
+
+        createdAt:
+          course.created_at,
+      },
     }
   }
 )
