@@ -1,4 +1,8 @@
 <script setup>
+// ============================================================
+// Props
+// ============================================================
+
 const props =
   defineProps({
     batch: {
@@ -10,7 +14,28 @@ const props =
       type: Boolean,
       default: false,
     },
+
+    editable: {
+      type: Boolean,
+      default: true,
+    },
+
+    loading: {
+      type: Boolean,
+      default: false,
+    },
   })
+
+// ============================================================
+// Emits
+// ============================================================
+
+const emit =
+  defineEmits([
+    'edit-reason',
+    'cancel',
+    'restore',
+  ])
 
 // ============================================================
 // Weekday
@@ -49,15 +74,16 @@ const formatDate = (
   return value
     ? String(
         value
-      ).slice(
-        0,
-        10
       )
+        .slice(
+          0,
+          10
+        )
     : '-'
 }
 
 // ============================================================
-// DateTime
+// Date Time
 // ============================================================
 
 const formatDateTime = (
@@ -122,10 +148,11 @@ const formatTime = (
 ) => {
   return String(
     value || ''
-  ).slice(
-    0,
-    5
   )
+    .slice(
+      0,
+      5
+    )
 }
 
 // ============================================================
@@ -173,6 +200,67 @@ const creatorLabel =
       '-'
     )
   })
+
+// ============================================================
+// Status
+// ============================================================
+
+const isCancelled =
+  computed(() => {
+    return (
+      props.batch
+        ?.status ===
+      'CANCELLED'
+    )
+  })
+
+// ============================================================
+// Actions
+// ============================================================
+
+const editReason =
+  () => {
+    if (
+      props.loading
+    ) {
+      return
+    }
+
+    emit(
+      'edit-reason',
+      props.batch
+    )
+  }
+
+const cancelBatch =
+  () => {
+    if (
+      props.loading ||
+      isCancelled.value
+    ) {
+      return
+    }
+
+    emit(
+      'cancel',
+      props.batch
+    )
+  }
+
+const restoreBatch =
+  () => {
+    if (
+      props.loading ||
+      !isCancelled.value
+    ) {
+      return
+    }
+
+    emit(
+      'restore',
+      props.batch
+    )
+  }
 </script>
 
 <template>
@@ -180,10 +268,13 @@ const creatorLabel =
     class="leave-batch-card"
     :class="{
       'leave-batch-card--cancelled':
-        batch.status ===
-        'CANCELLED',
+        isCancelled,
     }"
   >
+    <!-- ======================================================
+         Header
+         ====================================================== -->
+
     <div class="card-header">
       <div>
         <span class="eyebrow">
@@ -213,43 +304,70 @@ const creatorLabel =
           class="status-badge"
           :class="{
             'status-badge--cancelled':
-              batch.status ===
-              'CANCELLED',
+              isCancelled,
           }"
         >
           {{
-            batch.status ===
-              'ACTIVE'
-              ? '有效'
-              : '已取消'
+            isCancelled
+              ? '已取消'
+              : '有效'
           }}
         </span>
 
         <strong>
-          {{
-            itemCount
-          }}
+          {{ itemCount }}
           堂
         </strong>
       </div>
     </div>
 
-    <div
-      v-if="
-        batch.reason
-      "
-      class="reason"
-    >
-      <span>
-        請假原因
-      </span>
+    <!-- ======================================================
+         Reason
+         ====================================================== -->
 
-      <p>
+    <div class="reason">
+      <div class="reason-header">
+        <span>
+          請假原因
+        </span>
+
+        <button
+          v-if="
+            editable
+          "
+          type="button"
+          :disabled="
+            loading
+          "
+          @click="
+            editReason
+          "
+        >
+          修改
+        </button>
+      </div>
+
+      <p
+        v-if="
+          batch.reason
+        "
+      >
         {{
           batch.reason
         }}
       </p>
+
+      <p
+        v-else
+        class="no-reason"
+      >
+        未填寫原因
+      </p>
     </div>
+
+    <!-- ======================================================
+         Items
+         ====================================================== -->
 
     <div
       v-if="
@@ -328,33 +446,122 @@ const creatorLabel =
             item.attendance_status
           "
           class="attendance-status"
+          :class="{
+            'attendance-status--cancelled':
+              item.attendance_status ===
+              'CANCELLED',
+          }"
         >
           {{
             item.attendance_status ===
               'LEAVE'
               ? '請假'
-              : item.attendance_status
+              : (
+                  item.attendance_status ===
+                    'ATTENDED'
+                    ? '已上課'
+                    : (
+                        item.attendance_status ===
+                          'ABSENT'
+                          ? '缺席'
+                          : (
+                              item.attendance_status ===
+                                'CANCELLED'
+                                ? '已取消'
+                                : item.attendance_status
+                            )
+                      )
+                )
           }}
         </span>
       </div>
     </div>
 
-    <footer class="card-footer">
-      <span>
-        建立：
-        {{
-          creatorLabel
-        }}
-      </span>
+    <!-- ======================================================
+         Footer
+         ====================================================== -->
 
-      <span>
+    <footer class="card-footer">
+      <div>
+        <span>
+          建立：
+          {{
+            creatorLabel
+          }}
+        </span>
+
+        <span>
+          {{
+            formatDateTime(
+              batch.created_at
+            )
+          }}
+        </span>
+      </div>
+
+      <span
+        v-if="
+          isCancelled &&
+          batch.cancelled_at
+        "
+      >
+        取消：
         {{
           formatDateTime(
-            batch.created_at
+            batch.cancelled_at
           )
         }}
       </span>
     </footer>
+
+    <!-- ======================================================
+         Actions
+         ====================================================== -->
+
+    <div
+      v-if="
+        editable
+      "
+      class="card-actions"
+    >
+      <button
+        v-if="
+          !isCancelled
+        "
+        type="button"
+        class="cancel-button"
+        :disabled="
+          loading
+        "
+        @click="
+          cancelBatch
+        "
+      >
+        {{
+          loading
+            ? '處理中...'
+            : '取消這批請假'
+        }}
+      </button>
+
+      <button
+        v-else
+        type="button"
+        class="restore-button"
+        :disabled="
+          loading
+        "
+        @click="
+          restoreBatch
+        "
+      >
+        {{
+          loading
+            ? '處理中...'
+            : '恢復這批請假'
+        }}
+      </button>
+    </div>
   </article>
 </template>
 
@@ -364,11 +571,18 @@ const creatorLabel =
   background: #ffffff;
   border: 1px solid #eeeeee;
   border-radius: 18px;
+  transition:
+    opacity
+    0.2s ease;
 }
 
 .leave-batch-card--cancelled {
-  opacity: 0.6;
+  background: #fafafa;
 }
+
+/* ============================================================
+   Header
+   ============================================================ */
 
 .card-header {
   display: flex;
@@ -417,6 +631,10 @@ const creatorLabel =
   color: #c94343;
 }
 
+/* ============================================================
+   Reason
+   ============================================================ */
+
 .reason {
   margin-top: 13px;
   padding: 11px;
@@ -424,16 +642,45 @@ const creatorLabel =
   border-radius: 11px;
 }
 
-.reason span {
+.reason-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reason-header span {
   color: #999999;
   font-size: 9px;
 }
 
+.reason-header button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  background: #ffffff;
+  border-radius: 7px;
+  color: #555555;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.reason-header button:disabled {
+  opacity: 0.5;
+}
+
 .reason p {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   font-size: 10px;
   line-height: 1.6;
 }
+
+.reason .no-reason {
+  color: #aaaaaa;
+}
+
+/* ============================================================
+   Items
+   ============================================================ */
 
 .item-list {
   margin-top: 12px;
@@ -468,6 +715,7 @@ const creatorLabel =
 }
 
 .attendance-status {
+  flex: 0 0 auto;
   padding: 4px 7px;
   background: #f0f0f0;
   border-radius: 999px;
@@ -475,14 +723,65 @@ const creatorLabel =
   font-size: 8px;
 }
 
+.attendance-status--cancelled {
+  background: #fff0f0;
+  color: #c94343;
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+
 .card-footer {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid #eeeeee;
   color: #aaaaaa;
   font-size: 9px;
+}
+
+.card-footer > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ============================================================
+   Actions
+   ============================================================ */
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.card-actions button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cancel-button {
+  background: #fff0f0;
+  color: #bf4545;
+}
+
+.restore-button {
+  background: #222222;
+  color: #ffffff;
+}
+
+.card-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 </style>

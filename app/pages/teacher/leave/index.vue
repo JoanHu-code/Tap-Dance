@@ -4,6 +4,10 @@ definePageMeta({
     'teacher-auth',
 })
 
+// ============================================================
+// State
+// ============================================================
+
 const loading =
   ref(true)
 
@@ -36,6 +40,10 @@ const summary =
     totalSessions: 0,
   })
 
+// ============================================================
+// Filters
+// ============================================================
+
 const filters =
   reactive({
     studentId: '',
@@ -44,6 +52,10 @@ const filters =
     startDate: '',
     endDate: '',
   })
+
+// ============================================================
+// Create
+// ============================================================
 
 const showCreateDialog =
   ref(false)
@@ -56,14 +68,71 @@ const createForm =
     reason: '',
   })
 
+// ============================================================
+// Action Dialog
+// ============================================================
+
+const showActionDialog =
+  ref(false)
+
+const selectedActionBatch =
+  ref(null)
+
+const selectedAction =
+  ref('')
+
+// ============================================================
+// Toast
+// ============================================================
+
 let toastTimer =
   null
 
+const showSuccess =
+  (
+    message
+  ) => {
+    successMessage.value =
+      message
+
+    if (
+      toastTimer
+    ) {
+      window.clearTimeout(
+        toastTimer
+      )
+    }
+
+    toastTimer =
+      window.setTimeout(
+        () => {
+          successMessage.value =
+            ''
+        },
+        2500
+      )
+  }
+
 // ============================================================
-// Student Enrolled Course IDs
-//
-// 目前 teacher leaves GET 提供的是全部 Course。
-// 真正送出時 Service 還會再次驗證 Enrollment。
+// Leave Actions
+// ============================================================
+
+const {
+  actionLoading,
+  actionLoadingBatchId,
+  actionError,
+  updateReason,
+  cancelBatch,
+  restoreBatch,
+  clearActionError,
+} =
+  useLeaveBatchActions({
+    role:
+      'TEACHER',
+  })
+
+// ============================================================
+// Create Course
 // ============================================================
 
 const availableCreateCourses =
@@ -72,9 +141,7 @@ const availableCreateCourses =
   })
 
 // ============================================================
-// Sessions
-//
-// 元件自己會再根據 courseId Filter。
+// Create Sessions
 // ============================================================
 
 const createSessions =
@@ -101,34 +168,6 @@ const createSessions =
         }
       )
   })
-
-// ============================================================
-// Toast
-// ============================================================
-
-const showSuccess = (
-  message
-) => {
-    successMessage.value =
-      message
-
-    if (
-      toastTimer
-    ) {
-      window.clearTimeout(
-        toastTimer
-      )
-    }
-
-    toastTimer =
-      window.setTimeout(
-        () => {
-          successMessage.value =
-            ''
-        },
-        2500
-      )
-  }
 
 // ============================================================
 // Fetch
@@ -189,7 +228,12 @@ const fetchLeaves =
 
       summary.value =
         response.summary ||
-        summary.value
+        {
+          total: 0,
+          active: 0,
+          cancelled: 0,
+          totalSessions: 0,
+        }
     } catch (error) {
       console.error(
         'Leave 載入失敗：',
@@ -209,7 +253,7 @@ const fetchLeaves =
   }
 
 // ============================================================
-// Reset Filter
+// Reset Filters
 // ============================================================
 
 const resetFilters =
@@ -329,7 +373,8 @@ const createLeave =
                 createForm.sessionIds,
 
               reason:
-                createForm.reason ||
+                createForm.reason
+                  .trim() ||
                 null,
             },
           }
@@ -362,6 +407,100 @@ const createLeave =
     }
   }
 
+// ============================================================
+// Open Action Dialog
+// ============================================================
+
+const openActionDialog =
+  (
+    batch,
+    action
+  ) => {
+    clearActionError()
+
+    selectedActionBatch.value =
+      batch
+
+    selectedAction.value =
+      action
+
+    showActionDialog.value =
+      true
+  }
+
+// ============================================================
+// Action Submit
+// ============================================================
+
+const submitAction =
+  async (
+    payload
+  ) => {
+    errorMessage.value =
+      ''
+
+    try {
+      let response =
+        null
+
+      if (
+        payload.action ===
+        'UPDATE_REASON'
+      ) {
+        response =
+          await updateReason(
+            payload.batch.id,
+            payload.reason
+          )
+      } else if (
+        payload.action ===
+        'CANCEL'
+      ) {
+        response =
+          await cancelBatch(
+            payload.batch.id,
+            payload.reason
+          )
+      } else if (
+        payload.action ===
+        'RESTORE'
+      ) {
+        response =
+          await restoreBatch(
+            payload.batch.id,
+            payload.reason
+          )
+      }
+
+      showActionDialog.value =
+        false
+
+      selectedActionBatch.value =
+        null
+
+      selectedAction.value =
+        ''
+
+      showSuccess(
+        response?.message ||
+        '請假紀錄已更新'
+      )
+
+      await fetchLeaves()
+    } catch (error) {
+      errorMessage.value =
+        actionError.value ||
+        error?.data
+          ?.statusMessage ||
+        error?.message ||
+        '請假操作失敗'
+    }
+  }
+
+// ============================================================
+// Mounted
+// ============================================================
+
 onMounted(
   async () => {
     await fetchLeaves()
@@ -384,6 +523,10 @@ onBeforeUnmount(
 <template>
   <main class="leave-page">
     <div class="container">
+      <!-- ====================================================
+           Header
+           ==================================================== -->
+
       <header class="page-header">
         <div>
           <NuxtLink
@@ -402,7 +545,7 @@ onBeforeUnmount(
           </h1>
 
           <p>
-            管理學生單次與批次請假。
+            管理學生單次、批次請假，以及取消與恢復。
           </p>
         </div>
 
@@ -417,13 +560,19 @@ onBeforeUnmount(
         </button>
       </header>
 
+      <!-- ====================================================
+           Error
+           ==================================================== -->
+
       <div
         v-if="
           errorMessage
         "
         class="error-message"
       >
-        {{ errorMessage }}
+        {{
+          errorMessage
+        }}
       </div>
 
       <!-- ====================================================
@@ -437,7 +586,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.total }}
+            {{
+              summary.total
+            }}
           </strong>
         </article>
 
@@ -447,7 +598,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.active }}
+            {{
+              summary.active
+            }}
           </strong>
         </article>
 
@@ -457,7 +610,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.cancelled }}
+            {{
+              summary.cancelled
+            }}
           </strong>
         </article>
 
@@ -467,7 +622,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.totalSessions }}
+            {{
+              summary.totalSessions
+            }}
           </strong>
         </article>
       </section>
@@ -497,7 +654,9 @@ onBeforeUnmount(
               student.id
             "
           >
-            {{ student.name }}
+            {{
+              student.name
+            }}
           </option>
         </select>
 
@@ -521,7 +680,9 @@ onBeforeUnmount(
               course.id
             "
           >
-            {{ course.name }}
+            {{
+              course.name
+            }}
           </option>
         </select>
 
@@ -612,6 +773,37 @@ onBeforeUnmount(
             :show-student="
               true
             "
+            :editable="
+              true
+            "
+            :loading="
+              actionLoading &&
+              String(
+                actionLoadingBatchId ||
+                ''
+              ) ===
+                String(
+                  batch.id
+                )
+            "
+            @edit-reason="
+              openActionDialog(
+                $event,
+                'UPDATE_REASON'
+              )
+            "
+            @cancel="
+              openActionDialog(
+                $event,
+                'CANCEL'
+              )
+            "
+            @restore="
+              openActionDialog(
+                $event,
+                'RESTORE'
+              )
+            "
           />
         </div>
 
@@ -650,7 +842,7 @@ onBeforeUnmount(
           </h2>
 
           <p class="description">
-            勾一堂就是單次請假；同一門課勾多堂就是批次請假。
+            勾一堂是單次請假；同一門課勾多堂就是批次請假。
           </p>
 
           <label>
@@ -677,7 +869,9 @@ onBeforeUnmount(
                   student.id
                 "
               >
-                {{ student.name }}
+                {{
+                  student.name
+                }}
               </option>
             </select>
           </label>
@@ -707,7 +901,9 @@ onBeforeUnmount(
                   course.id
                 "
               >
-                {{ course.name }}
+                {{
+                  course.name
+                }}
               </option>
             </select>
           </label>
@@ -758,16 +954,20 @@ onBeforeUnmount(
                 creating ||
                 !createForm.studentId ||
                 !createForm.courseId ||
-                !createForm.sessionIds.length
+                !createForm.sessionIds
+                  .length
               "
             >
               {{
                 creating
                   ? '建立中...'
                   : (
-                      createForm.sessionIds.length > 1
+                      createForm
+                        .sessionIds
+                        .length >
+                        1
                         ? `批次請假 ${createForm.sessionIds.length} 堂`
-                        : '請假'
+                        : '確認請假'
                     )
               }}
             </button>
@@ -776,6 +976,32 @@ onBeforeUnmount(
       </div>
     </Teleport>
 
+    <!-- ======================================================
+         Action Dialog
+         ====================================================== -->
+
+    <LeaveBatchActionDialog
+      v-model="
+        showActionDialog
+      "
+      :batch="
+        selectedActionBatch
+      "
+      :action="
+        selectedAction
+      "
+      :loading="
+        actionLoading
+      "
+      @submit="
+        submitAction
+      "
+    />
+
+    <!-- ======================================================
+         Toast
+         ====================================================== -->
+
     <Transition name="toast">
       <div
         v-if="
@@ -783,7 +1009,9 @@ onBeforeUnmount(
         "
         class="toast"
       >
-        {{ successMessage }}
+        {{
+          successMessage
+        }}
       </div>
     </Transition>
   </main>
@@ -792,7 +1020,10 @@ onBeforeUnmount(
 <style scoped>
 .leave-page {
   min-height: 100vh;
-  padding: 28px 20px 60px;
+  padding:
+    28px
+    20px
+    60px;
   background: #f6f6f6;
   color: #222222;
 }
@@ -802,6 +1033,10 @@ onBeforeUnmount(
   max-width: 1120px;
   margin: 0 auto;
 }
+
+/* ============================================================
+   Header
+   ============================================================ */
 
 .page-header {
   display: flex;
@@ -818,31 +1053,46 @@ onBeforeUnmount(
   text-decoration: none;
 }
 
-.page-header > div > span {
+.page-header >
+div >
+span {
   color: #999999;
   font-size: 10px;
   letter-spacing: 1px;
 }
 
 .page-header h1 {
-  margin: 4px 0 0;
+  margin:
+    4px
+    0
+    0;
 }
 
 .page-header p {
-  margin: 6px 0 0;
+  margin:
+    6px
+    0
+    0;
   color: #888888;
   font-size: 12px;
 }
 
 .primary-button {
   min-height: 42px;
-  padding: 0 15px;
+  padding:
+    0
+    15px;
   border: 0;
   background: #222222;
   border-radius: 12px;
   color: #ffffff;
   font-size: 11px;
+  cursor: pointer;
 }
+
+/* ============================================================
+   Summary
+   ============================================================ */
 
 .summary-grid {
   display: grid;
@@ -872,6 +1122,10 @@ onBeforeUnmount(
   font-size: 21px;
 }
 
+/* ============================================================
+   Filter
+   ============================================================ */
+
 .filter-card {
   display: grid;
   grid-template-columns:
@@ -892,7 +1146,9 @@ onBeforeUnmount(
 .filter-card select,
 .filter-card input {
   min-height: 39px;
-  padding: 0 9px;
+  padding:
+    0
+    9px;
   border: 1px solid #dddddd;
   background: #ffffff;
   border-radius: 9px;
@@ -900,7 +1156,9 @@ onBeforeUnmount(
 }
 
 .filter-actions {
-  grid-column: 1 / -1;
+  grid-column:
+    1 /
+    -1;
   display: flex;
   justify-content: flex-end;
   gap: 7px;
@@ -908,16 +1166,23 @@ onBeforeUnmount(
 
 .filter-actions button {
   min-height: 35px;
-  padding: 0 12px;
+  padding:
+    0
+    12px;
   border: 0;
   background: #eeeeee;
   border-radius: 9px;
+  cursor: pointer;
 }
 
 .search-button {
   background: #222222 !important;
   color: #ffffff;
 }
+
+/* ============================================================
+   Batches
+   ============================================================ */
 
 .batch-section {
   margin-top: 15px;
@@ -937,6 +1202,10 @@ onBeforeUnmount(
   text-align: center;
 }
 
+/* ============================================================
+   Error
+   ============================================================ */
+
 .error-message {
   margin-top: 12px;
   padding: 10px;
@@ -946,6 +1215,10 @@ onBeforeUnmount(
   font-size: 10px;
 }
 
+/* ============================================================
+   Create Dialog
+   ============================================================ */
+
 .dialog-mask {
   position: fixed;
   inset: 0;
@@ -954,7 +1227,14 @@ onBeforeUnmount(
   align-items: center;
   justify-content: center;
   padding: 18px;
-  background: rgb(0 0 0 / 45%);
+  background:
+    rgb(
+      0
+      0
+      0
+      /
+      45%
+    );
 }
 
 .dialog {
@@ -965,7 +1245,8 @@ onBeforeUnmount(
   max-width: 560px;
   max-height:
     calc(
-      100vh - 36px
+      100vh -
+      36px
     );
   overflow-y: auto;
   padding: 22px;
@@ -994,7 +1275,9 @@ onBeforeUnmount(
 .dialog select,
 .dialog textarea {
   min-height: 41px;
-  padding: 8px 10px;
+  padding:
+    8px
+    10px;
   border: 1px solid #dddddd;
   border-radius: 10px;
 }
@@ -1002,7 +1285,8 @@ onBeforeUnmount(
 .dialog-actions {
   display: grid;
   grid-template-columns:
-    1fr 1fr;
+    1fr
+    1fr;
   gap: 8px;
   margin-top: 5px;
 }
@@ -1023,17 +1307,26 @@ onBeforeUnmount(
   opacity: 0.5;
 }
 
+/* ============================================================
+   Toast
+   ============================================================ */
+
 .toast {
   position: fixed;
   bottom: 25px;
   left: 50%;
-  z-index: 1100;
-  padding: 10px 18px;
+  z-index: 1300;
+  padding:
+    10px
+    18px;
   background: #222222;
   border-radius: 999px;
   color: #ffffff;
   font-size: 10px;
-  transform: translateX(-50%);
+  transform:
+    translateX(
+      -50%
+    );
 }
 
 @media (
@@ -1041,12 +1334,14 @@ onBeforeUnmount(
 ) {
   .summary-grid {
     grid-template-columns:
-      1fr 1fr;
+      1fr
+      1fr;
   }
 
   .filter-card {
     grid-template-columns:
-      1fr 1fr;
+      1fr
+      1fr;
   }
 }
 
@@ -1054,7 +1349,10 @@ onBeforeUnmount(
   max-width: 520px
 ) {
   .leave-page {
-    padding: 18px 13px 45px;
+    padding:
+      18px
+      13px
+      45px;
   }
 
   .page-header {

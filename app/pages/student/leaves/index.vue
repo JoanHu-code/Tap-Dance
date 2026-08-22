@@ -4,6 +4,10 @@ definePageMeta({
     'student-auth',
 })
 
+// ============================================================
+// State
+// ============================================================
+
 const loading =
   ref(true)
 
@@ -36,6 +40,10 @@ const summary =
     totalSessions: 0,
   })
 
+// ============================================================
+// Filters
+// ============================================================
+
 const filters =
   reactive({
     courseId: '',
@@ -43,6 +51,10 @@ const filters =
     startDate: '',
     endDate: '',
   })
+
+// ============================================================
+// Create
+// ============================================================
 
 const showCreateDialog =
   ref(false)
@@ -54,8 +66,68 @@ const createForm =
     reason: '',
   })
 
+// ============================================================
+// Action Dialog
+// ============================================================
+
+const showActionDialog =
+  ref(false)
+
+const selectedActionBatch =
+  ref(null)
+
+const selectedAction =
+  ref('')
+
+// ============================================================
+// Toast
+// ============================================================
+
 let toastTimer =
   null
+
+const showSuccess =
+  (
+    message
+  ) => {
+    successMessage.value =
+      message
+
+    if (
+      toastTimer
+    ) {
+      window.clearTimeout(
+        toastTimer
+      )
+    }
+
+    toastTimer =
+      window.setTimeout(
+        () => {
+          successMessage.value =
+            ''
+        },
+        2500
+      )
+  }
+
+// ============================================================
+// Leave Actions
+// ============================================================
+
+const {
+  actionLoading,
+  actionLoadingBatchId,
+  actionError,
+  updateReason,
+  cancelBatch,
+  restoreBatch,
+  clearActionError,
+} =
+  useLeaveBatchActions({
+    role:
+      'STUDENT',
+  })
 
 // ============================================================
 // Create Sessions
@@ -85,34 +157,6 @@ const createSessions =
         }
       )
   })
-
-// ============================================================
-// Toast
-// ============================================================
-
-const showSuccess = (
-  message
-) => {
-    successMessage.value =
-      message
-
-    if (
-      toastTimer
-    ) {
-      window.clearTimeout(
-        toastTimer
-      )
-    }
-
-    toastTimer =
-      window.setTimeout(
-        () => {
-          successMessage.value =
-            ''
-        },
-        2500
-      )
-  }
 
 // ============================================================
 // Fetch
@@ -169,7 +213,12 @@ const fetchLeaves =
 
       summary.value =
         response.summary ||
-        summary.value
+        {
+          total: 0,
+          active: 0,
+          cancelled: 0,
+          totalSessions: 0,
+        }
     } catch (error) {
       console.error(
         '學生 Leave 載入失敗：',
@@ -189,7 +238,7 @@ const fetchLeaves =
   }
 
 // ============================================================
-// Reset Filter
+// Reset
 // ============================================================
 
 const resetFilters =
@@ -210,7 +259,7 @@ const resetFilters =
   }
 
 // ============================================================
-// Create
+// Open Create
 // ============================================================
 
 const openCreateDialog =
@@ -228,6 +277,10 @@ const openCreateDialog =
       true
   }
 
+// ============================================================
+// Course Change
+// ============================================================
+
 watch(
   () =>
     createForm.courseId,
@@ -238,7 +291,7 @@ watch(
 )
 
 // ============================================================
-// Submit
+// Submit Leave
 // ============================================================
 
 const submitLeave =
@@ -291,7 +344,8 @@ const submitLeave =
                 createForm.sessionIds,
 
               reason:
-                createForm.reason ||
+                createForm.reason
+                  .trim() ||
                 null,
             },
           }
@@ -323,6 +377,100 @@ const submitLeave =
         false
     }
   }
+
+// ============================================================
+// Open Action
+// ============================================================
+
+const openActionDialog =
+  (
+    batch,
+    action
+  ) => {
+    clearActionError()
+
+    selectedActionBatch.value =
+      batch
+
+    selectedAction.value =
+      action
+
+    showActionDialog.value =
+      true
+  }
+
+// ============================================================
+// Submit Action
+// ============================================================
+
+const submitAction =
+  async (
+    payload
+  ) => {
+    errorMessage.value =
+      ''
+
+    try {
+      let response =
+        null
+
+      if (
+        payload.action ===
+        'UPDATE_REASON'
+      ) {
+        response =
+          await updateReason(
+            payload.batch.id,
+            payload.reason
+          )
+      } else if (
+        payload.action ===
+        'CANCEL'
+      ) {
+        response =
+          await cancelBatch(
+            payload.batch.id,
+            payload.reason
+          )
+      } else if (
+        payload.action ===
+        'RESTORE'
+      ) {
+        response =
+          await restoreBatch(
+            payload.batch.id,
+            payload.reason
+          )
+      }
+
+      showActionDialog.value =
+        false
+
+      selectedActionBatch.value =
+        null
+
+      selectedAction.value =
+        ''
+
+      showSuccess(
+        response?.message ||
+        '請假紀錄已更新'
+      )
+
+      await fetchLeaves()
+    } catch (error) {
+      errorMessage.value =
+        actionError.value ||
+        error?.data
+          ?.statusMessage ||
+        error?.message ||
+        '請假操作失敗'
+    }
+  }
+
+// ============================================================
+// Mounted
+// ============================================================
 
 onMounted(
   async () => {
@@ -386,13 +534,19 @@ onBeforeUnmount(
         </button>
       </header>
 
+      <!-- ====================================================
+           Error
+           ==================================================== -->
+
       <div
         v-if="
           errorMessage
         "
         class="error-message"
       >
-        {{ errorMessage }}
+        {{
+          errorMessage
+        }}
       </div>
 
       <!-- ====================================================
@@ -406,7 +560,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.total }}
+            {{
+              summary.total
+            }}
           </strong>
         </article>
 
@@ -416,7 +572,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.active }}
+            {{
+              summary.active
+            }}
           </strong>
         </article>
 
@@ -426,7 +584,9 @@ onBeforeUnmount(
           </span>
 
           <strong>
-            {{ summary.totalSessions }}
+            {{
+              summary.totalSessions
+            }}
           </strong>
         </article>
       </section>
@@ -556,6 +716,37 @@ onBeforeUnmount(
             "
             :batch="
               batch
+            "
+            :editable="
+              true
+            "
+            :loading="
+              actionLoading &&
+              String(
+                actionLoadingBatchId ||
+                ''
+              ) ===
+                String(
+                  batch.id
+                )
+            "
+            @edit-reason="
+              openActionDialog(
+                $event,
+                'UPDATE_REASON'
+              )
+            "
+            @cancel="
+              openActionDialog(
+                $event,
+                'CANCEL'
+              )
+            "
+            @restore="
+              openActionDialog(
+                $event,
+                'RESTORE'
+              )
             "
           />
         </div>
@@ -690,14 +881,18 @@ onBeforeUnmount(
               :disabled="
                 creating ||
                 !createForm.courseId ||
-                !createForm.sessionIds.length
+                !createForm.sessionIds
+                  .length
               "
             >
               {{
                 creating
                   ? '送出中...'
                   : (
-                      createForm.sessionIds.length > 1
+                      createForm
+                        .sessionIds
+                        .length >
+                        1
                         ? `批次請假 ${createForm.sessionIds.length} 堂`
                         : '確認請假'
                     )
@@ -708,6 +903,32 @@ onBeforeUnmount(
       </div>
     </Teleport>
 
+    <!-- ======================================================
+         Action Dialog
+         ====================================================== -->
+
+    <LeaveBatchActionDialog
+      v-model="
+        showActionDialog
+      "
+      :batch="
+        selectedActionBatch
+      "
+      :action="
+        selectedAction
+      "
+      :loading="
+        actionLoading
+      "
+      @submit="
+        submitAction
+      "
+    />
+
+    <!-- ======================================================
+         Toast
+         ====================================================== -->
+
     <Transition name="toast">
       <div
         v-if="
@@ -715,7 +936,9 @@ onBeforeUnmount(
         "
         class="toast"
       >
-        {{ successMessage }}
+        {{
+          successMessage
+        }}
       </div>
     </Transition>
   </main>
@@ -724,7 +947,10 @@ onBeforeUnmount(
 <style scoped>
 .student-leave-page {
   min-height: 100vh;
-  padding: 20px 14px 50px;
+  padding:
+    20px
+    14px
+    50px;
   background: #f7f7f7;
   color: #222222;
 }
@@ -764,24 +990,33 @@ span,
 }
 
 .page-header h1 {
-  margin: 4px 0 0;
+  margin:
+    4px
+    0
+    0;
   font-size: 24px;
 }
 
 .page-header p {
-  margin: 4px 0 0;
+  margin:
+    4px
+    0
+    0;
   color: #888888;
   font-size: 10px;
 }
 
 .primary-button {
   min-height: 39px;
-  padding: 0 12px;
+  padding:
+    0
+    12px;
   border: 0;
   background: #222222;
   border-radius: 11px;
   color: #ffffff;
   font-size: 10px;
+  cursor: pointer;
 }
 
 /* ============================================================
@@ -823,7 +1058,8 @@ span,
 .filter-card {
   display: grid;
   grid-template-columns:
-    1fr 1fr;
+    1fr
+    1fr;
   gap: 7px;
   margin-top: 13px;
   padding: 13px;
@@ -834,7 +1070,9 @@ span,
 .filter-card select,
 .filter-card input {
   min-height: 37px;
-  padding: 0 8px;
+  padding:
+    0
+    8px;
   border: 1px solid #dddddd;
   background: #ffffff;
   border-radius: 9px;
@@ -842,7 +1080,9 @@ span,
 }
 
 .filter-actions {
-  grid-column: 1 / -1;
+  grid-column:
+    1 /
+    -1;
   display: flex;
   justify-content: flex-end;
   gap: 6px;
@@ -850,11 +1090,14 @@ span,
 
 .filter-actions button {
   min-height: 33px;
-  padding: 0 11px;
+  padding:
+    0
+    11px;
   border: 0;
   background: #eeeeee;
   border-radius: 8px;
   font-size: 9px;
+  cursor: pointer;
 }
 
 .filter-actions .search-button {
@@ -871,7 +1114,10 @@ span,
 }
 
 .section-title h2 {
-  margin: 3px 0 9px;
+  margin:
+    3px
+    0
+    9px;
   font-size: 16px;
 }
 
@@ -891,7 +1137,20 @@ span,
 }
 
 /* ============================================================
-   Dialog
+   Error
+   ============================================================ */
+
+.error-message {
+  margin-top: 11px;
+  padding: 10px;
+  background: #fff0f0;
+  border-radius: 10px;
+  color: #c94343;
+  font-size: 10px;
+}
+
+/* ============================================================
+   Create Dialog
    ============================================================ */
 
 .dialog-mask {
@@ -902,7 +1161,14 @@ span,
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgb(0 0 0 / 45%);
+  background:
+    rgb(
+      0
+      0
+      0
+      /
+      45%
+    );
 }
 
 .dialog {
@@ -913,7 +1179,8 @@ span,
   max-width: 430px;
   max-height:
     calc(
-      100vh - 32px
+      100vh -
+      32px
     );
   overflow-y: auto;
   padding: 20px;
@@ -942,7 +1209,9 @@ span,
 .dialog select,
 .dialog textarea {
   min-height: 40px;
-  padding: 8px 9px;
+  padding:
+    8px
+    9px;
   border: 1px solid #dddddd;
   border-radius: 10px;
 }
@@ -967,7 +1236,8 @@ span,
 .dialog-actions {
   display: grid;
   grid-template-columns:
-    1fr 1fr;
+    1fr
+    1fr;
   gap: 7px;
 }
 
@@ -989,29 +1259,25 @@ span,
 }
 
 /* ============================================================
-   Messages
+   Toast
    ============================================================ */
-
-.error-message {
-  margin-top: 11px;
-  padding: 10px;
-  background: #fff0f0;
-  border-radius: 10px;
-  color: #c94343;
-  font-size: 10px;
-}
 
 .toast {
   position: fixed;
   bottom: 25px;
   left: 50%;
-  z-index: 1100;
-  padding: 10px 17px;
+  z-index: 1300;
+  padding:
+    10px
+    17px;
   background: #222222;
   border-radius: 999px;
   color: #ffffff;
   font-size: 10px;
-  transform: translateX(-50%);
+  transform:
+    translateX(
+      -50%
+    );
 }
 
 @media (
@@ -1023,7 +1289,8 @@ span,
   }
 
   .filter-actions {
-    grid-column: auto;
+    grid-column:
+      auto;
   }
 }
 </style>
