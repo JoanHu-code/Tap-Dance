@@ -15,8 +15,8 @@ const loginLoading =
 const packageLoading =
   ref(false)
 
-const renewLoading =
-  ref(false)
+const renewLoadingPackageId =
+  ref(null)
 
 const errorMessage =
   ref('')
@@ -46,296 +46,7 @@ const linked =
   ref(false)
 
 // ============================================================
-// Current Enrollment
-// ============================================================
-
-const currentEnrollment =
-  computed(() => {
-    return (
-      enrollments.value.find(
-        (
-          item
-        ) => {
-          return (
-            !item.status ||
-            item.status ===
-              'ACTIVE'
-          )
-        }
-      ) ||
-      enrollments.value[0] ||
-      null
-    )
-  })
-
-// ============================================================
-// Active / Current Package
-//
-// 優先找目前 Enrollment 對應 Course。
-// ============================================================
-
-const activePackage =
-  computed(() => {
-    const courseId =
-      currentEnrollment.value
-        ?.course_id
-
-    if (courseId) {
-      const sameCourseActive =
-        packages.value.find(
-          (
-            item
-          ) => {
-            return (
-              String(
-                item.course_id
-              ) ===
-                String(
-                  courseId
-                ) &&
-              item.status ===
-                'ACTIVE'
-            )
-          }
-        )
-
-      if (
-        sameCourseActive
-      ) {
-        return sameCourseActive
-      }
-
-      const sameCourseLatest =
-        packages.value.find(
-          (
-            item
-          ) => {
-            return (
-              String(
-                item.course_id
-              ) ===
-              String(
-                courseId
-              )
-            )
-          }
-        )
-
-      if (
-        sameCourseLatest
-      ) {
-        return sameCourseLatest
-      }
-    }
-
-    return (
-      packages.value.find(
-        (
-          item
-        ) => {
-          return (
-            item.status ===
-            'ACTIVE'
-          )
-        }
-      ) ||
-      packages.value[0] ||
-      null
-    )
-  })
-
-// ============================================================
-// Total Sessions
-// ============================================================
-
-const totalSessions =
-  computed(() => {
-    return Number(
-      activePackage.value
-        ?.total_sessions ||
-      0
-    )
-  })
-
-// ============================================================
-// Used Sessions
-//
-// 正式以 Package API 回傳的 attended_count 為主。
-// ============================================================
-
-const usedSessions =
-  computed(() => {
-    return Number(
-      activePackage.value
-        ?.attended_count ??
-      activePackage.value
-        ?.used_sessions ??
-      0
-    )
-  })
-
-// ============================================================
-// Remaining
-// ============================================================
-
-const remainingSessions =
-  computed(() => {
-    return Math.max(
-      totalSessions.value -
-        usedSessions.value,
-      0
-    )
-  })
-
-// ============================================================
-// Progress
-// ============================================================
-
-const progressPercentage =
-  computed(() => {
-    if (
-      totalSessions.value <=
-      0
-    ) {
-      return 0
-    }
-
-    return Math.min(
-      Math.round(
-        (
-          usedSessions.value /
-          totalSessions.value
-        ) *
-          100
-      ),
-      100
-    )
-  })
-
-// ============================================================
-// Can Renew
-//
-// 最重要：
-//
-// 7 / 8 → false
-// 8 / 8 → true
-//
-// 前端只控制顯示。
-// 後端仍會重新檢查。
-// ============================================================
-
-const canRenew =
-  computed(() => {
-    const packageData =
-      activePackage.value
-
-    if (!packageData) {
-      return false
-    }
-
-    const total =
-      Number(
-        packageData
-          .total_sessions ||
-        0
-      )
-
-    const attended =
-      Number(
-        packageData
-          .attended_count ??
-        0
-      )
-
-    if (
-      total <= 0
-    ) {
-      return false
-    }
-
-    if (
-      packageData.status ===
-      'CANCELLED'
-    ) {
-      return false
-    }
-
-    return (
-      attended >= total
-    )
-  })
-
-// ============================================================
-// Course Name
-// ============================================================
-
-const courseName =
-  computed(() => {
-    return (
-      currentEnrollment.value
-        ?.course_name ||
-      activePackage.value
-        ?.course_name ||
-      currentEnrollment.value
-        ?.name ||
-      '尚未設定課程'
-    )
-  })
-
-// ============================================================
-// Schedule
-// ============================================================
-
-const scheduleText =
-  computed(() => {
-    const weekday =
-      currentEnrollment.value
-        ?.schedule_weekday
-
-    const startTime =
-      currentEnrollment.value
-        ?.schedule_start_time
-
-    if (
-      weekday ===
-        undefined ||
-      weekday ===
-        null
-    ) {
-      return '尚未設定固定班別'
-    }
-
-    const weekdayMap = {
-      1: '星期一',
-      2: '星期二',
-      3: '星期三',
-      4: '星期四',
-      5: '星期五',
-      6: '星期六',
-      7: '星期日',
-    }
-
-    const label =
-      weekdayMap[
-        Number(
-          weekday
-        )
-      ] ||
-      String(
-        weekday
-      )
-
-    if (!startTime) {
-      return label
-    }
-
-    return `${label} ${String(
-      startTime
-    ).slice(0, 5)}`
-  })
-
-// ============================================================
-// Format Money
+// Money
 // ============================================================
 
 const formatMoney = (
@@ -353,7 +64,7 @@ const formatMoney = (
 }
 
 // ============================================================
-// Format Date
+// Date
 // ============================================================
 
 const formatDate = (
@@ -395,7 +106,84 @@ const formatDate = (
 }
 
 // ============================================================
-// Attendance Status
+// 星期
+//
+// DB class_schedules.weekday：
+// 1 = 星期一
+// ...
+// 7 = 星期日
+// ============================================================
+
+const getWeekdayLabel = (
+  weekday
+) => {
+  const map = {
+    1: '星期一',
+    2: '星期二',
+    3: '星期三',
+    4: '星期四',
+    5: '星期五',
+    6: '星期六',
+    7: '星期日',
+  }
+
+  return (
+    map[
+      Number(
+        weekday
+      )
+    ] ||
+    ''
+  )
+}
+
+// ============================================================
+// Schedule
+//
+// 現階段仍使用 default_schedule_id 對應的單一預設時段。
+// 下一次新增 student_enrollment_schedules 後，
+// 再改成一門課可以顯示多個時段。
+// ============================================================
+
+const getScheduleText = (
+  enrollment
+) => {
+  const weekday =
+    enrollment
+      ?.schedule_weekday
+
+  const startTime =
+    enrollment
+      ?.schedule_start_time
+
+  if (
+    weekday ===
+      undefined ||
+    weekday ===
+      null
+  ) {
+    return '尚未設定預設班別'
+  }
+
+  const weekdayLabel =
+    getWeekdayLabel(
+      weekday
+    )
+
+  if (!startTime) {
+    return (
+      weekdayLabel ||
+      '尚未設定預設班別'
+    )
+  }
+
+  return `${weekdayLabel} ${String(
+    startTime
+  ).slice(0, 5)}`
+}
+
+// ============================================================
+// Attendance Label
 // ============================================================
 
 const getAttendanceLabel = (
@@ -426,9 +214,163 @@ const getAttendanceLabel = (
 }
 
 // ============================================================
-// 取得自己的 Package
+// 找某一門 Course 最新的 Package
 //
-// 不使用 studentId。
+// Package API 已依：
+// course_id + cycle_no DESC
+// 排序。
+//
+// 所以同 Course 第一筆就是最新一期。
+// ============================================================
+
+const getLatestPackageByCourse =
+  (
+    courseId
+  ) => {
+    return (
+      packages.value.find(
+        (
+          item
+        ) => {
+          return (
+            String(
+              item.course_id
+            ) ===
+            String(
+              courseId
+            )
+          )
+        }
+      ) ||
+      null
+    )
+  }
+
+// ============================================================
+// 課程卡
+//
+// 一個 Enrollment = 一門學生正在上的 Course。
+// 每門 Course 各自配自己的最新 Package。
+// ============================================================
+
+const courseCards =
+  computed(() => {
+    return enrollments.value
+      .filter(
+        (
+          enrollment
+        ) => {
+          return (
+            !enrollment.status ||
+            enrollment.status ===
+              'ACTIVE'
+          )
+        }
+      )
+      .map(
+        (
+          enrollment
+        ) => {
+          const packageData =
+            getLatestPackageByCourse(
+              enrollment.course_id
+            )
+
+          const totalSessions =
+            Number(
+              packageData
+                ?.total_sessions ||
+              0
+            )
+
+          const attendedCount =
+            Number(
+              packageData
+                ?.attended_count ||
+              0
+            )
+
+          const remainingSessions =
+            Math.max(
+              totalSessions -
+                attendedCount,
+              0
+            )
+
+          const progressPercentage =
+            totalSessions > 0
+              ? Math.min(
+                  Math.round(
+                    (
+                      attendedCount /
+                      totalSessions
+                    ) *
+                      100
+                  ),
+                  100
+                )
+              : 0
+
+          const canRenew =
+            Boolean(
+              packageData &&
+              totalSessions > 0 &&
+              attendedCount >=
+                totalSessions &&
+              packageData.status !==
+                'CANCELLED'
+            )
+
+          return {
+            enrollment,
+
+            package:
+              packageData,
+
+            courseId:
+              enrollment.course_id,
+
+            courseName:
+              enrollment.course_name ||
+              packageData
+                ?.course_name ||
+              '未命名課程',
+
+            scheduleText:
+              getScheduleText(
+                enrollment
+              ),
+
+            totalSessions,
+
+            attendedCount,
+
+            remainingSessions,
+
+            progressPercentage,
+
+            canRenew,
+          }
+        }
+      )
+  })
+
+// ============================================================
+// 是否完全沒有 Enrollment
+// ============================================================
+
+const hasCourses =
+  computed(() => {
+    return (
+      courseCards.value
+        .length > 0
+    )
+  })
+
+// ============================================================
+// Package
+//
+// 學生只能查自己的。
 // ============================================================
 
 const fetchPackages =
@@ -523,17 +465,13 @@ const loginStudent =
         )
 
       // ======================================================
-      // Auth Store
+      // Auth
       // ======================================================
 
       authStore
         .setStudentLogin(
           response
         )
-
-      // ======================================================
-      // User
-      // ======================================================
 
       user.value =
         response.user ||
@@ -549,7 +487,14 @@ const loginStudent =
         null
 
       // ======================================================
-      // Dashboard 基本資料
+      // Enrollment
+      //
+      // 可以同時存在：
+      //
+      // 踢踏舞
+      // Swing
+      // Jazz
+      // ...
       // ======================================================
 
       enrollments.value =
@@ -557,10 +502,18 @@ const loginStudent =
           ?.enrollments ||
         []
 
+      // ======================================================
+      // Attendance
+      // ======================================================
+
       attendanceRecords.value =
         response.dashboard
           ?.attendanceRecords ||
         []
+
+      // ======================================================
+      // Bank
+      // ======================================================
 
       bankAccount.value =
         response.dashboard
@@ -568,8 +521,10 @@ const loginStudent =
         null
 
       // ======================================================
-      // 先放登入 API 的 Package
-      // 再由正式 Package API 覆蓋。
+      // Package
+      //
+      // 登入 API 的資料只當暫時值，
+      // 正式資料由 /api/student/packages 覆蓋。
       // ======================================================
 
       packages.value =
@@ -605,34 +560,38 @@ const loginStudent =
 
 // ============================================================
 // Renew
+//
+// 每一張 Course Card 都有自己獨立的 Renew。
+// 未滿堂時按鈕根本不會顯示。
 // ============================================================
 
 const renewPackage =
-  async () => {
+  async (
+    courseCard
+  ) => {
+    const packageData =
+      courseCard?.package
+
+    if (!packageData) {
+      return
+    }
+
     if (
-      renewLoading.value
+      renewLoadingPackageId
+        .value
     ) {
       return
     }
 
-    const currentPackage =
-      activePackage.value
-
-    if (!currentPackage) {
-      return
-    }
-
     // ========================================================
-    // 前端第二次確認
-    //
-    // 不滿堂就直接停止。
+    // 前端再次驗證
     // ========================================================
 
     if (
-      !canRenew.value
+      !courseCard.canRenew
     ) {
       errorMessage.value =
-        '目前堂數尚未完成，無法續期'
+        `${courseCard.courseName} 尚未完成本期堂數，無法續期`
 
       return
     }
@@ -640,13 +599,15 @@ const renewPackage =
     const confirmed =
       window.confirm(
         [
-          `目前第 ${currentPackage.cycle_no || 1} 期已完成。`,
+          `${courseCard.courseName}`,
           '',
-          `本期共 ${totalSessions.value} 堂，已完成 ${usedSessions.value} 堂。`,
+          `目前第 ${packageData.cycle_no || 1} 期已完成。`,
+          '',
+          `本期共 ${courseCard.totalSessions} 堂，已完成 ${courseCard.attendedCount} 堂。`,
           '',
           '確定已完成繳費，並開始下一期嗎？',
           '',
-          `下一期將沿用 ${totalSessions.value} 堂、NT$ ${formatMoney(currentPackage.price)}。`,
+          `下一期將沿用 ${courseCard.totalSessions} 堂、NT$ ${formatMoney(packageData.price)}。`,
         ].join(
           '\n'
         )
@@ -656,8 +617,9 @@ const renewPackage =
       return
     }
 
-    renewLoading.value =
-      true
+    renewLoadingPackageId
+      .value =
+        packageData.id
 
     errorMessage.value =
       ''
@@ -675,28 +637,23 @@ const renewPackage =
 
             body: {
               packageId:
-                currentPackage.id,
+                packageData.id,
             },
           }
         )
 
       renewMessage.value =
-        response.message ||
-        '續期完成'
+        `${courseCard.courseName}：${response.message || '續期完成'}`
 
       // ======================================================
-      // 重新向 Server 取 Package
+      // 重新取所有 Package
       //
-      // 不自己猜資料，
-      // Server 才是真實來源。
+      // 例如只有 Swing Renew：
+      //
+      // 踢踏舞完全不受影響。
       // ======================================================
 
       await fetchPackages()
-
-      // ======================================================
-      // Bank Account 若下一期沿用，
-      // 現有畫面可繼續使用。
-      // ======================================================
     } catch (error) {
       console.error(
         '學生續期失敗：',
@@ -710,8 +667,9 @@ const renewPackage =
         error?.message ||
         '續期失敗'
     } finally {
-      renewLoading.value =
-        false
+      renewLoadingPackageId
+        .value =
+          null
     }
   }
 
@@ -765,7 +723,7 @@ onMounted(
     </div>
 
     <!-- ======================================================
-         Error
+         Login Error
          ====================================================== -->
 
     <div
@@ -826,7 +784,7 @@ onMounted(
           </span>
 
           <h1>
-            課程紀錄
+            我的課程
           </h1>
 
           <p
@@ -859,7 +817,7 @@ onMounted(
       </header>
 
       <!-- ====================================================
-           Error Notice
+           일반 Error
            ==================================================== -->
 
       <div
@@ -877,7 +835,22 @@ onMounted(
       </div>
 
       <!-- ====================================================
-           未綁定
+           Renew Success
+           ==================================================== -->
+
+      <div
+        v-if="
+          renewMessage
+        "
+        class="renew-success"
+      >
+        {{
+          renewMessage
+        }}
+      </div>
+
+      <!-- ====================================================
+           尚未綁定
            ==================================================== -->
 
       <section
@@ -914,171 +887,229 @@ onMounted(
 
       <template v-else>
         <!-- ==================================================
-             Course
+             沒有課程
              ================================================== -->
 
-        <section class="course-card">
-          <div class="course-card__top">
-            <div>
-              <span>
-                Current Course
-              </span>
-
-              <h2>
-                {{
-                  courseName
-                }}
-              </h2>
-
-              <p>
-                {{
-                  scheduleText
-                }}
-              </p>
-            </div>
-
-            <div
-              v-if="
-                activePackage
-              "
-              class="cycle-badge"
-            >
-              第
-              {{
-                activePackage
-                  ?.cycle_no ||
-                1
-              }}
-              期
-            </div>
+        <section
+          v-if="
+            !hasCourses
+          "
+          class="empty-course-card"
+        >
+          <div class="empty-course-card__icon">
+            ♪
           </div>
+
+          <h2>
+            尚未加入課程
+          </h2>
+
+          <p>
+            老師尚未替您設定任何課程。
+          </p>
         </section>
 
         <!-- ==================================================
-             Progress
+             多課程列表
              ================================================== -->
 
-        <section class="progress-card">
-          <div class="progress-header">
-            <div>
-              <span>
-                本期課程
-              </span>
+        <section
+          v-else
+          class="course-list"
+        >
+          <article
+            v-for="
+              courseCard in
+                courseCards
+            "
+            :key="
+              courseCard.enrollment.id
+            "
+            class="course-progress-card"
+          >
+            <!-- ==============================================
+                 Course Header
+                 ============================================== -->
 
-              <strong>
+            <div class="course-card-header">
+              <div>
+                <span class="course-label">
+                  Course
+                </span>
+
+                <h2>
+                  {{
+                    courseCard.courseName
+                  }}
+                </h2>
+
+                <p>
+                  {{
+                    courseCard.scheduleText
+                  }}
+                </p>
+              </div>
+
+              <div
+                v-if="
+                  courseCard.package
+                "
+                class="cycle-badge"
+              >
+                第
                 {{
-                  usedSessions
+                  courseCard
+                    .package
+                    .cycle_no ||
+                  1
                 }}
-                /
-                {{
-                  totalSessions
-                }}
-              </strong>
+                期
+              </div>
             </div>
 
-            <div class="remaining">
-              剩餘
+            <!-- ==============================================
+                 還沒有 Package
+                 ============================================== -->
 
-              <strong>
-                {{
-                  remainingSessions
-                }}
-              </strong>
-
-              堂
-            </div>
-          </div>
-
-          <div class="progress-track">
             <div
-              class="progress-value"
-              :style="{
-                width:
-                  `${progressPercentage}%`,
-              }"
-            />
-          </div>
-
-          <div class="progress-footer">
-            <span>
-              {{
-                progressPercentage
-              }}%
-            </span>
-
-            <span>
-              課程費用 NT$
-
-              {{
-                formatMoney(
-                  activePackage
-                    ?.price
-                )
-              }}
-            </span>
-          </div>
-
-          <!-- ================================================
-               Renew
-
-               只有滿堂才渲染。
-               7 / 8 時 DOM 裡根本沒有按鈕。
-               ================================================ -->
-
-          <div
-            v-if="
-              canRenew
-            "
-            class="completed-notice"
-          >
-            <strong>
-              本期堂數已完成
-            </strong>
-
-            <p>
-              本期共
-              {{
-                totalSessions
-              }}
-              堂，目前已完成
-              {{
-                usedSessions
-              }}
-              堂。
-            </p>
-
-            <p>
-              如果已經完成繳費，可以直接開始下一期。
-            </p>
-
-            <button
-              type="button"
-              class="renew-button"
-              :disabled="
-                renewLoading
+              v-if="
+                !courseCard.package
               "
-              @click="
-                renewPackage
-              "
+              class="no-package"
             >
-              {{
-                renewLoading
-                  ? '續期處理中...'
-                  : '已繳費，開始下一期'
-              }}
-            </button>
-          </div>
+              <strong>
+                尚未建立堂數方案
+              </strong>
 
-          <div
-            v-if="
-              renewMessage
-            "
-            class="renew-success"
-          >
-            {{
-              renewMessage
-            }}
-          </div>
+              <p>
+                已加入此課程，但老師尚未設定堂數與費用。
+              </p>
+            </div>
+
+            <!-- ==============================================
+                 Package Progress
+                 ============================================== -->
+
+            <template v-else>
+              <div class="progress-header">
+                <div>
+                  <span>
+                    本期課程
+                  </span>
+
+                  <strong>
+                    {{
+                      courseCard
+                        .attendedCount
+                    }}
+                    /
+                    {{
+                      courseCard
+                        .totalSessions
+                    }}
+                  </strong>
+                </div>
+
+                <div class="remaining">
+                  剩餘
+
+                  <strong>
+                    {{
+                      courseCard
+                        .remainingSessions
+                    }}
+                  </strong>
+
+                  堂
+                </div>
+              </div>
+
+              <div class="progress-track">
+                <div
+                  class="progress-value"
+                  :style="{
+                    width:
+                      `${courseCard.progressPercentage}%`,
+                  }"
+                />
+              </div>
+
+              <div class="progress-footer">
+                <span>
+                  {{
+                    courseCard
+                      .progressPercentage
+                  }}%
+                </span>
+
+                <span>
+                  課程費用 NT$
+
+                  {{
+                    formatMoney(
+                      courseCard
+                        .package
+                        .price
+                    )
+                  }}
+                </span>
+              </div>
+
+              <!-- ============================================
+                   Renew
+
+                   只有這門 Course 滿堂才顯示。
+                   ============================================ -->
+
+              <div
+                v-if="
+                  courseCard.canRenew
+                "
+                class="completed-notice"
+              >
+                <strong>
+                  本期堂數已完成
+                </strong>
+
+                <p>
+                  {{
+                    courseCard.courseName
+                  }}
+                  本期
+                  {{
+                    courseCard
+                      .totalSessions
+                  }}
+                  堂已全部完成。
+                </p>
+
+                <p>
+                  如果已完成繳費，可以開始下一期。
+                </p>
+
+                <button
+                  type="button"
+                  class="renew-button"
+                  :disabled="
+                    renewLoadingPackageId ===
+                    courseCard.package.id
+                  "
+                  @click="
+                    renewPackage(
+                      courseCard
+                    )
+                  "
+                >
+                  {{
+                    renewLoadingPackageId ===
+                    courseCard.package.id
+                      ? '續期處理中...'
+                      : '已繳費，開始下一期'
+                  }}
+                </button>
+              </div>
+            </template>
+          </article>
         </section>
 
         <!-- ==================================================
@@ -1150,7 +1181,7 @@ onMounted(
             </strong>
 
             <small>
-              查詢過去課程
+              查詢過去所有課程
             </small>
           </NuxtLink>
         </section>
@@ -1201,7 +1232,7 @@ onMounted(
         </section>
 
         <!-- ==================================================
-             Recent Attendance
+             Recent
              ================================================== -->
 
         <section class="history-card">
@@ -1291,6 +1322,10 @@ onMounted(
   margin: 0 auto;
 }
 
+/* ============================================================
+   Header
+   ============================================================ */
+
 .student-header {
   display: flex;
   align-items: center;
@@ -1335,11 +1370,21 @@ onMounted(
   object-fit: cover;
 }
 
-.course-card,
-.progress-card,
+/* ============================================================
+   Course List
+   ============================================================ */
+
+.course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.course-progress-card,
 .bank-card,
 .history-card,
-.link-card {
+.link-card,
+.empty-course-card {
   padding: 20px;
   background: #ffffff;
   border: 1px solid #eeeeee;
@@ -1349,15 +1394,15 @@ onMounted(
     rgb(0 0 0 / 4%);
 }
 
-.course-card__top {
+.course-card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
 }
 
-.course-card span,
-.progress-card span,
+.course-label,
+.course-progress-card span,
 .bank-card span,
 .section-title span {
   color: #999999;
@@ -1365,12 +1410,12 @@ onMounted(
   letter-spacing: 0.8px;
 }
 
-.course-card h2 {
+.course-card-header h2 {
   margin: 5px 0 0;
   font-size: 21px;
 }
 
-.course-card p {
+.course-card-header p {
   margin: 7px 0 0;
   color: #777777;
   font-size: 13px;
@@ -1387,11 +1432,38 @@ onMounted(
   font-size: 12px;
 }
 
+/* ============================================================
+   No Package
+   ============================================================ */
+
+.no-package {
+  margin-top: 18px;
+  padding: 15px;
+  background: #f7f7f7;
+  border-radius: 15px;
+}
+
+.no-package strong {
+  font-size: 13px;
+}
+
+.no-package p {
+  margin: 5px 0 0;
+  color: #888888;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   Progress
+   ============================================================ */
+
 .progress-header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
+  margin-top: 22px;
 }
 
 .progress-header >
@@ -1485,13 +1557,47 @@ div:first-child {
 }
 
 .renew-success {
-  margin-top: 12px;
   padding: 12px 14px;
   background: #eef8ee;
   border-radius: 13px;
   color: #4b8e50;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* ============================================================
+   Empty Courses
+   ============================================================ */
+
+.empty-course-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 34px 22px;
+  text-align: center;
+}
+
+.empty-course-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  background: #f3f3f3;
+  border-radius: 16px;
+  color: #555555;
+  font-weight: 700;
+}
+
+.empty-course-card h2 {
+  margin: 17px 0 0;
+  font-size: 18px;
+}
+
+.empty-course-card p {
+  margin: 7px 0 0;
+  color: #999999;
+  font-size: 12px;
 }
 
 /* ============================================================
@@ -1789,6 +1895,10 @@ div:first-child {
       18px
       14px
       40px;
+  }
+
+  .progress-footer {
+    gap: 10px;
   }
 }
 </style>
