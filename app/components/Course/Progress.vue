@@ -50,7 +50,10 @@ const formattedPrice = computed(() => {
       </div>
 
       <div class="course-card__shoe">
-        👞
+        <img
+          src="/favicon.png"
+          alt="Tap Dance"
+        >
       </div>
     </div>
 
@@ -115,7 +118,13 @@ h1 {
   height: 48px;
   background: #fff3f0;
   border-radius: 16px;
-  font-size: 24px;
+}
+
+.course-card__shoe img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .course-card__count {

@@ -292,7 +292,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="avatar">
-          👞
+          <img
+            src="/favicon.png"
+            alt="Tap Dance"
+          >
         </div>
       </header>
 
@@ -476,6 +479,13 @@ onBeforeUnmount(() => {
   box-shadow:
     0 5px 16px
     rgb(0 0 0 / 5%);
+}
+
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .dialog-mask {
