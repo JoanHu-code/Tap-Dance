@@ -1,782 +1,1064 @@
 <script setup>
-const {
-  $liff,
-} = useNuxtApp()
-
-const loading = ref(true)
-
-const loginLoading = ref(false)
-
-const errorMessage = ref('')
-
-const user = ref(null)
-
-const student = ref(null)
-
-const enrollments = ref([])
-
-const packages = ref([])
-
-const attendanceRecords = ref([])
-
-const bankAccount = ref(null)
-
-const linked = ref(false)
-
-const activePackage = computed(() => {
-  return (
-    packages.value.find(
-      (item) =>
-        item.status === 'ACTIVE'
-    ) ||
-    packages.value[0] ||
-    null
-  )
+definePageMeta({
+  middleware:
+    'teacher-auth',
 })
 
-const currentEnrollment = computed(() => {
-  return (
-    enrollments.value.find(
-      (item) =>
-        !item.status ||
-        item.status === 'ACTIVE'
-    ) ||
-    enrollments.value[0] ||
-    null
-  )
-})
+const loading =
+  ref(true)
 
-const totalSessions = computed(() => {
-  return Number(
-    activePackage.value
-      ?.total_sessions ||
-    activePackage.value
-      ?.totalSessions ||
-    0
-  )
-})
+const saving =
+  ref(false)
 
-const usedSessions = computed(() => {
-  return Number(
-    activePackage.value
-      ?.used_sessions ??
-    activePackage.value
-      ?.attended_count ??
-    0
-  )
-})
+const errorMessage =
+  ref('')
 
-const remainingSessions =
+const successMessage =
+  ref('')
+
+const students =
+  ref([])
+
+const search =
+  ref('')
+
+const linkedFilter =
+  ref('ALL')
+
+const showCreateDialog =
+  ref(false)
+
+const form =
+  reactive({
+    name: '',
+
+    phone: '',
+  })
+
+let searchTimer =
+  null
+
+let messageTimer =
+  null
+
+const total =
   computed(() => {
-    return Math.max(
-      totalSessions.value -
-        usedSessions.value,
-      0
+    return students.value
+      .length
+  })
+
+const linkedCount =
+  computed(() => {
+    return students.value
+      .filter(
+        (student) => {
+          return Boolean(
+            student.user_id
+          )
+        }
+      )
+      .length
+  })
+
+const unlinkedCount =
+  computed(() => {
+    return (
+      total.value -
+      linkedCount.value
     )
   })
 
-const progressPercentage =
-  computed(() => {
+const getStudentName = (
+  student
+) => {
+  return (
+    student?.name ||
+    student?.display_name ||
+    `學生 #${student?.id}`
+  )
+}
+
+const showSuccess = (
+  text
+) => {
+  successMessage.value =
+    text
+
+  if (messageTimer) {
+    window.clearTimeout(
+      messageTimer
+    )
+  }
+
+  messageTimer =
+    window.setTimeout(
+      () => {
+        successMessage.value =
+          ''
+      },
+      2200
+    )
+}
+
+const fetchStudents =
+  async () => {
+    loading.value =
+      true
+
+    errorMessage.value =
+      ''
+
+    try {
+      const query = {}
+
+      if (
+        search.value
+          .trim()
+      ) {
+        query.search =
+          search.value
+            .trim()
+      }
+
+      if (
+        linkedFilter.value ===
+        'LINKED'
+      ) {
+        query.linked =
+          'true'
+      }
+
+      if (
+        linkedFilter.value ===
+        'UNLINKED'
+      ) {
+        query.linked =
+          'false'
+      }
+
+      const response =
+        await $fetch(
+          '/api/teacher/students',
+          {
+            query,
+          }
+        )
+
+      students.value =
+        response?.students ||
+        []
+    } catch (error) {
+      console.error(
+        '取得學生列表失敗：',
+        error
+      )
+
+      errorMessage.value =
+        error?.data
+          ?.statusMessage ||
+        error?.statusMessage ||
+        error?.message ||
+        '學生列表載入失敗'
+    } finally {
+      loading.value =
+        false
+    }
+  }
+
+const resetForm =
+  () => {
+    form.name = ''
+    form.phone = ''
+  }
+
+const openCreateDialog =
+  () => {
+    resetForm()
+
+    showCreateDialog.value =
+      true
+  }
+
+const closeCreateDialog =
+  () => {
     if (
-      totalSessions.value <= 0
+      saving.value
     ) {
-      return 0
+      return
     }
 
-    return Math.min(
-      Math.round(
-        (
-          usedSessions.value /
-          totalSessions.value
-        ) * 100
-      ),
-      100
-    )
-  })
+    showCreateDialog.value =
+      false
 
-const courseName = computed(() => {
-  return (
-    currentEnrollment.value
-      ?.course_name ||
-    currentEnrollment.value
-      ?.name ||
-    '尚未設定課程'
-  )
-})
-
-const scheduleText = computed(() => {
-  const weekday =
-    currentEnrollment.value
-      ?.schedule_weekday
-
-  const startTime =
-    currentEnrollment.value
-      ?.schedule_start_time
-
-  if (
-    weekday === undefined ||
-    weekday === null
-  ) {
-    return '尚未設定固定班別'
+    resetForm()
   }
 
-  const weekdayMap = {
-    0: '星期日',
-    1: '星期一',
-    2: '星期二',
-    3: '星期三',
-    4: '星期四',
-    5: '星期五',
-    6: '星期六',
-  }
-
-  const label =
-    weekdayMap[
-      Number(weekday)
-    ] ||
-    String(weekday)
-
-  if (!startTime) {
-    return label
-  }
-
-  return `${label} ${String(
-    startTime
-  ).slice(0, 5)}`
-})
-
-const formatMoney = (
-  value
-) => {
-  const number =
-    Number(value || 0)
-
-  return new Intl
-    .NumberFormat(
-      'zh-TW'
-    )
-    .format(number)
-}
-
-const formatDate = (
-  value
-) => {
-  if (!value) {
-    return '-'
-  }
-
-  const date =
-    new Date(value)
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return String(value)
-  }
-
-  return new Intl
-    .DateTimeFormat(
-      'zh-TW',
-      {
-        timeZone:
-          'Asia/Taipei',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }
-    )
-    .format(date)
-}
-
-const getAttendanceLabel = (
-  record
-) => {
-  const status =
-    record.status
-
-  switch (status) {
-    case 'ATTENDED':
-      return '已上課'
-
-    case 'LEAVE':
-      return '請假'
-
-    case 'ABSENT':
-      return '缺席'
-
-    case 'CANCELLED':
-      return '已取消'
-
-    default:
-      return status || '紀錄'
-  }
-}
-
-const loginStudent = async () => {
-  if (loginLoading.value) {
-    return
-  }
-
-  loginLoading.value = true
-  errorMessage.value = ''
-
-  try {
-    await $liff.initialize(
-      'STUDENT'
-    )
-
+const createStudent =
+  async () => {
     if (
-      !$liff.isLoggedIn()
+      saving.value
     ) {
-      await $liff.login(
-        'STUDENT'
-      )
+      return
+    }
+
+    const name =
+      form.name
+        .trim()
+
+    const phone =
+      form.phone
+        .trim()
+
+    if (!name) {
+      errorMessage.value =
+        '請輸入學生姓名'
 
       return
     }
 
-    const idToken =
-      await $liff.getIdToken(
-        'STUDENT'
+    saving.value =
+      true
+
+    errorMessage.value =
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          '/api/teacher/students',
+          {
+            method:
+              'POST',
+
+            body: {
+              name,
+
+              phone,
+            },
+          }
+        )
+
+      showCreateDialog.value =
+        false
+
+      resetForm()
+
+      showSuccess(
+        response?.message ||
+        '學生建立成功'
       )
 
-    if (!idToken) {
-      throw new Error(
-        '無法取得 LINE ID Token'
+      await fetchStudents()
+    } catch (error) {
+      console.error(
+        '建立學生失敗：',
+        error
+      )
+
+      errorMessage.value =
+        error?.data
+          ?.statusMessage ||
+        error?.statusMessage ||
+        error?.message ||
+        '建立學生失敗'
+    } finally {
+      saving.value =
+        false
+    }
+  }
+
+const handleSearch =
+  () => {
+    if (searchTimer) {
+      window.clearTimeout(
+        searchTimer
       )
     }
 
-    const response =
-      await $fetch(
-        '/api/auth/student/line',
-        {
-          method: 'POST',
-
-          body: {
-            idToken,
-          },
-        }
+    searchTimer =
+      window.setTimeout(
+        async () => {
+          await fetchStudents()
+        },
+        350
       )
-
-    user.value =
-      response.user || null
-    
-    const authStore =
-        useAuthStore()
-
-    authStore.setStudentLogin(
-        response
-    )  
-
-    linked.value =
-      Boolean(
-        response.linked
-      )
-
-    student.value =
-      response.student ||
-      null
-
-    enrollments.value =
-      response.dashboard
-        ?.enrollments || []
-
-    packages.value =
-      response.dashboard
-        ?.packages || []
-
-    attendanceRecords.value =
-      response.dashboard
-        ?.attendanceRecords ||
-      []
-
-    bankAccount.value =
-      response.dashboard
-        ?.bankAccount ||
-      null
-  } catch (error) {
-    console.error(
-      'Student login error:',
-      error
-    )
-
-    errorMessage.value =
-      error?.data
-        ?.statusMessage ||
-      error?.statusMessage ||
-      error?.message ||
-      '學生端登入失敗'
-  } finally {
-    loginLoading.value = false
-    loading.value = false
   }
-}
 
-const retryLogin = async () => {
-  loading.value = true
+const handleFilterChange =
+  async () => {
+    await fetchStudents()
+  }
 
-  await loginStudent()
-}
+const clearSearch =
+  async () => {
+    search.value = ''
 
-onMounted(async () => {
-  await loginStudent()
-})
+    await fetchStudents()
+  }
+
+onMounted(
+  async () => {
+    await fetchStudents()
+  }
+)
+
+onBeforeUnmount(
+  () => {
+    if (searchTimer) {
+      window.clearTimeout(
+        searchTimer
+      )
+    }
+
+    if (messageTimer) {
+      window.clearTimeout(
+        messageTimer
+      )
+    }
+  }
+)
 </script>
 
 <template>
-  <main class="student-home">
+  <main
+    class="
+      students-page
+    "
+  >
     <div
-      v-if="loading"
-      class="state-page"
+      class="
+        students-container
+      "
     >
-      <div class="state-card">
-        <div class="loader" />
-
-        <h2>
-          正在載入課程
-        </h2>
-
-        <p>
-          正在確認您的 LINE 身分。
-        </p>
-      </div>
-    </div>
-
-    <div
-      v-else-if="errorMessage"
-      class="state-page"
-    >
-      <div class="state-card">
-        <div
-          class="
-            state-icon
-            state-icon--error
-          "
-        >
-          !
-        </div>
-
-        <h2>
-          無法進入學生端
-        </h2>
-
-        <p>
-          {{ errorMessage }}
-        </p>
-
-        <button
-          type="button"
-          class="primary-button"
-          @click="retryLogin"
-        >
-          重新嘗試
-        </button>
-      </div>
-    </div>
-
-    <div
-      v-else
-      class="student-container"
-    >
-      <header class="student-header">
+      <header
+        class="
+          page-header
+        "
+      >
         <div>
-          <span>
-            Tap Dance
+          <NuxtLink
+            to="/teacher"
+            class="
+              back-link
+            "
+          >
+            ← 管理首頁
+          </NuxtLink>
+
+          <span
+            class="eyebrow"
+          >
+            Students
           </span>
 
           <h1>
-            課程紀錄
+            學生管理
           </h1>
 
-          <p
-            v-if="student"
-          >
-            {{
-              student.name ||
-              student.display_name ||
-              user?.display_name
-            }}
+          <p>
+            管理學生基本資料、LINE 綁定與課程狀況。
           </p>
         </div>
 
-        <div class="avatar">
-          <img
-            v-if="
-              user?.picture_url
-            "
-            :src="
-              user.picture_url
-            "
-            alt="LINE 頭像"
-          >
-
-          <img
-            v-else
-            src="/favicon.png"
-            alt="Tap Dance"
-          >
-        </div>
+        <button
+          type="button"
+          class="
+            create-button
+          "
+          @click="
+            openCreateDialog
+          "
+        >
+          ＋ 新增學生
+        </button>
       </header>
 
       <section
-        v-if="!linked"
-        class="link-card"
+        class="
+          summary-grid
+        "
       >
-        <div class="link-card__icon">
-          !
-        </div>
-
-        <div>
-          <h2>
-            尚未綁定學生資料
-          </h2>
-
-          <p>
-            您已成功使用 LINE 登入，但目前這個 LINE 帳號還沒有連結老師建立的學生資料。
-          </p>
-        </div>
-
-        <NuxtLink
-          to="/student/link"
-          class="primary-link"
+        <article
+          class="
+            summary-card
+          "
         >
-          綁定學生資料
-        </NuxtLink>
+          <span>
+            學生總數
+          </span>
+
+          <strong>
+            {{
+              total
+            }}
+          </strong>
+        </article>
+
+        <article
+          class="
+            summary-card
+          "
+        >
+          <span>
+            LINE 已綁定
+          </span>
+
+          <strong>
+            {{
+              linkedCount
+            }}
+          </strong>
+        </article>
+
+        <article
+          class="
+            summary-card
+          "
+        >
+          <span>
+            尚未綁定
+          </span>
+
+          <strong>
+            {{
+              unlinkedCount
+            }}
+          </strong>
+        </article>
       </section>
 
-      <template v-else>
-        <section class="course-card">
-          <div class="course-card__top">
-            <div>
-              <span>
-                Current Course
-              </span>
-
-              <h2>
-                {{ courseName }}
-              </h2>
-
-              <p>
-                {{ scheduleText }}
-              </p>
-            </div>
-
-            <div class="cycle-badge">
-              第
-              {{
-                activePackage
-                  ?.cycle_no ||
-                1
-              }}
-              期
-            </div>
-          </div>
-        </section>
-
-        <section class="progress-card">
-          <div class="progress-header">
-            <div>
-              <span>
-                本期課程
-              </span>
-
-              <strong>
-                {{ usedSessions }}
-                /
-                {{ totalSessions }}
-              </strong>
-            </div>
-
-            <div class="remaining">
-              剩餘
-              <strong>
-                {{
-                  remainingSessions
-                }}
-              </strong>
-              堂
-            </div>
-          </div>
-
-          <div class="progress-track">
-            <div
-              class="progress-value"
-              :style="{
-                width:
-                  `${progressPercentage}%`,
-              }"
-            />
-          </div>
-
-          <div class="progress-footer">
-            <span>
-              {{
-                progressPercentage
-              }}%
-            </span>
-
-            <span>
-              課程費用 NT$
-              {{
-                formatMoney(
-                  activePackage
-                    ?.price
-                )
-              }}
-            </span>
-          </div>
-
-          <div
-            v-if="
-              activePackage &&
-              remainingSessions === 0
-            "
-            class="completed-notice"
-          >
-            本期堂數已完成，等待老師確認續期並開啟下一期。
-          </div>
-        </section>
-
-        <section class="quick-actions">
-          <NuxtLink
-            to="/student/attendance"
-            class="quick-action"
-          >
-            <span class="quick-action__icon">
-              ✓
-            </span>
-
-            <strong>
-              上課紀錄
-            </strong>
-
-            <small>
-              查看與修改本人紀錄
-            </small>
-          </NuxtLink>
-
-          <NuxtLink
-            to="/student/leave"
-            class="quick-action"
-          >
-            <span class="quick-action__icon">
-              假
-            </span>
-
-            <strong>
-              請假
-            </strong>
-
-            <small>
-              單次或批次請假
-            </small>
-          </NuxtLink>
-
-          <NuxtLink
-            to="/student/makeup"
-            class="quick-action"
-          >
-            <span class="quick-action__icon">
-              補
-            </span>
-
-            <strong>
-              補課
-            </strong>
-
-            <small>
-              查看可補課時段
-            </small>
-          </NuxtLink>
-
-          <NuxtLink
-            to="/student/history"
-            class="quick-action"
-          >
-            <span class="quick-action__icon">
-              歷
-            </span>
-
-            <strong>
-              歷史紀錄
-            </strong>
-
-            <small>
-              查詢過去課程
-            </small>
-          </NuxtLink>
-        </section>
-
-        <section
-          v-if="bankAccount"
-          class="bank-card"
+      <section
+        class="
+          toolbar
+        "
+      >
+        <div
+          class="
+            search-box
+          "
         >
-          <div>
-            <span>
-              繳費資訊
-            </span>
-
-            <h3>
-              {{
-                bankAccount.bank_name ||
-                '銀行帳戶'
-              }}
-            </h3>
-          </div>
-
-          <div class="bank-detail">
-            <span>
-              {{
-                bankAccount.bank_code ||
-                ''
-              }}
-            </span>
-
-            <strong>
-              {{
-                bankAccount.account_number ||
-                bankAccount.account_no ||
-                '-'
-              }}
-            </strong>
-          </div>
-        </section>
-
-        <section class="history-card">
-          <div class="section-title">
-            <div>
-              <span>
-                Recent
-              </span>
-
-              <h2>
-                最近紀錄
-              </h2>
-            </div>
-
-            <NuxtLink
-              to="/student/history"
-            >
-              查看全部
-            </NuxtLink>
-          </div>
-
-          <div
-            v-if="
-              attendanceRecords.length
+          <span
+            class="
+              search-box__icon
             "
-            class="history-list"
+          >
+            ⌕
+          </span>
+
+          <input
+            v-model="
+              search
+            "
+            type="search"
+            placeholder="
+              搜尋學生姓名或電話
+            "
+            @input="
+              handleSearch
+            "
+          >
+
+          <button
+            v-if="
+              search
+            "
+            type="button"
+            class="
+              search-box__clear
+            "
+            @click="
+              clearSearch
+            "
+          >
+            ×
+          </button>
+        </div>
+
+        <select
+          v-model="
+            linkedFilter
+          "
+          class="
+            filter-select
+          "
+          @change="
+            handleFilterChange
+          "
+        >
+          <option
+            value="ALL"
+          >
+            全部學生
+          </option>
+
+          <option
+            value="LINKED"
+          >
+            LINE 已綁定
+          </option>
+
+          <option
+            value="UNLINKED"
+          >
+            尚未綁定
+          </option>
+        </select>
+
+        <button
+          type="button"
+          class="
+            refresh-button
+          "
+          :disabled="
+            loading
+          "
+          @click="
+            fetchStudents
+          "
+        >
+          重新整理
+        </button>
+      </section>
+
+      <div
+        v-if="
+          errorMessage
+        "
+        class="
+          message
+          message--error
+        "
+      >
+        {{
+          errorMessage
+        }}
+      </div>
+
+      <section
+        class="
+          student-panel
+        "
+      >
+        <div
+          v-if="
+            loading
+          "
+          class="
+            loading-state
+          "
+        >
+          <div
+            class="loader"
+          />
+
+          <span>
+            正在載入學生資料
+          </span>
+        </div>
+
+        <div
+          v-else-if="
+            !students.length
+          "
+          class="
+            empty-state
+          "
+        >
+          <div
+            class="
+              empty-state__icon
+            "
+          >
+            人
+          </div>
+
+          <h2>
+            找不到學生
+          </h2>
+
+          <p
+            v-if="
+              search ||
+              linkedFilter !==
+                'ALL'
+            "
+          >
+            沒有符合目前搜尋條件的學生。
+          </p>
+
+          <p v-else>
+            目前尚未建立任何學生。
+          </p>
+
+          <button
+            v-if="
+              !search &&
+              linkedFilter ===
+                'ALL'
+            "
+            type="button"
+            class="
+              create-button
+            "
+            @click="
+              openCreateDialog
+            "
+          >
+            建立第一位學生
+          </button>
+        </div>
+
+        <div
+          v-else
+          class="
+            student-list
+          "
+        >
+          <NuxtLink
+            v-for="
+              student in
+                students
+            "
+            :key="
+              student.id
+            "
+            :to="
+              `/teacher/students/${student.id}`
+            "
+            class="
+              student-row
+            "
           >
             <div
-              v-for="record in
-                attendanceRecords"
-              :key="record.id"
-              class="history-item"
+              class="
+                student-avatar
+              "
             >
-              <div class="history-date">
-                {{
-                  formatDate(
-                    record.class_date ||
-                    record.date ||
-                    record.created_at
+              {{
+                getStudentName(
+                  student
+                )
+                  .slice(
+                    0,
+                    1
                   )
-                }}
-              </div>
-
-              <div class="history-status">
-                {{
-                  getAttendanceLabel(
-                    record
-                  )
-                }}
-              </div>
+              }}
             </div>
-          </div>
 
-          <div
-            v-else
-            class="empty-state"
-          >
-            尚未有課程紀錄
-          </div>
-        </section>
-      </template>
+            <div
+              class="
+                student-main
+              "
+            >
+              <strong>
+                {{
+                  getStudentName(
+                    student
+                  )
+                }}
+              </strong>
+
+              <span>
+                {{
+                  student.phone ||
+                  '未設定電話'
+                }}
+              </span>
+            </div>
+
+            <div
+              class="
+                student-binding
+              "
+            >
+              <span
+                class="
+                  binding-badge
+                "
+                :class="{
+                  'binding-badge--linked':
+                    student.user_id,
+                }"
+              >
+                {{
+                  student.user_id
+                    ? 'LINE 已綁定'
+                    : '尚未綁定'
+                }}
+              </span>
+            </div>
+
+            <span
+              class="
+                student-arrow
+              "
+            >
+              ›
+            </span>
+          </NuxtLink>
+        </div>
+      </section>
     </div>
+
+    <Teleport
+      to="body"
+    >
+      <Transition
+        name="dialog"
+      >
+        <div
+          v-if="
+            showCreateDialog
+          "
+          class="
+            dialog-mask
+          "
+          @click.self="
+            closeCreateDialog
+          "
+        >
+          <form
+            class="dialog"
+            @submit.prevent="
+              createStudent
+            "
+          >
+            <div
+              class="
+                dialog__header
+              "
+            >
+              <div>
+                <span>
+                  New Student
+                </span>
+
+                <h2>
+                  新增學生
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                class="
+                  dialog__close
+                "
+                :disabled="
+                  saving
+                "
+                @click="
+                  closeCreateDialog
+                "
+              >
+                ×
+              </button>
+            </div>
+
+            <div
+              class="
+                form-group
+              "
+            >
+              <label
+                for="
+                  student-name
+                "
+              >
+                學生姓名
+                <span>
+                  *
+                </span>
+              </label>
+
+              <input
+                id="
+                  student-name
+                "
+                v-model="
+                  form.name
+                "
+                type="text"
+                maxlength="100"
+                autocomplete="off"
+                placeholder="
+                  例如：王美玲
+                "
+              >
+            </div>
+
+            <div
+              class="
+                form-group
+              "
+            >
+              <label
+                for="
+                  student-phone
+                "
+              >
+                電話
+              </label>
+
+              <input
+                id="
+                  student-phone
+                "
+                v-model="
+                  form.phone
+                "
+                type="tel"
+                maxlength="30"
+                autocomplete="tel"
+                placeholder="
+                  例如：0912345678
+                "
+              >
+
+              <small>
+                學生即使尚未使用 LINE，也可以先建立資料。
+              </small>
+            </div>
+
+            <div
+              class="
+                dialog__actions
+              "
+            >
+              <button
+                type="button"
+                class="
+                  secondary-button
+                "
+                :disabled="
+                  saving
+                "
+                @click="
+                  closeCreateDialog
+                "
+              >
+                取消
+              </button>
+
+              <button
+                type="submit"
+                class="
+                  primary-button
+                "
+                :disabled="
+                  saving ||
+                  !form.name.trim()
+                "
+              >
+                {{
+                  saving
+                    ? '建立中...'
+                    : '建立學生'
+                }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Transition
+      name="toast"
+    >
+      <div
+        v-if="
+          successMessage
+        "
+        class="
+          toast
+        "
+      >
+        {{
+          successMessage
+        }}
+      </div>
+    </Transition>
   </main>
 </template>
 
 <style scoped>
-.student-home {
+.students-page {
   min-height: 100vh;
-  padding:
-    24px
-    16px
-    50px;
-  background: #f7f7f7;
+  padding: 28px 20px 60px;
+  background: #f6f6f6;
   color: #222222;
 }
 
-.student-container {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+.students-container {
   width: 100%;
-  max-width: 560px;
+  max-width: 1080px;
   margin: 0 auto;
 }
 
-.student-header {
+.page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  padding: 6px 4px;
+  gap: 24px;
 }
 
-.student-header span {
-  color: #999999;
-  font-size: 13px;
-  letter-spacing: 1px;
-}
-
-.student-header h1 {
-  margin: 3px 0 0;
-  font-size: 25px;
-}
-
-.student-header p {
-  margin: 4px 0 0;
+.back-link {
+  display: block;
+  margin-bottom: 18px;
   color: #777777;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.eyebrow {
+  color: #999999;
+  font-size: 12px;
+  letter-spacing: 1.1px;
+}
+
+.page-header h1 {
+  margin: 4px 0 0;
+  font-size: 28px;
+}
+
+.page-header p {
+  margin: 7px 0 0;
+  color: #888888;
   font-size: 13px;
 }
 
-.avatar {
+.create-button {
+  min-height: 44px;
+  padding: 10px 17px;
+  border: 0;
+  background: #222222;
+  border-radius: 14px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      3,
+      minmax(0, 1fr)
+    );
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.summary-card {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  overflow: hidden;
+  flex-direction: column;
+  min-height: 112px;
+  padding: 18px;
   background: #ffffff;
-  border-radius: 50%;
-  box-shadow:
-    0 5px 16px
-    rgb(0 0 0 / 5%);
+  border: 1px solid #eeeeee;
+  border-radius: 20px;
 }
 
-.avatar img {
+.summary-card span {
+  color: #888888;
+  font-size: 12px;
+}
+
+.summary-card strong {
+  margin-top: auto;
+  font-size: 27px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.search-box {
+  position: relative;
+  flex: 1;
+}
+
+.search-box input {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: 46px;
+  padding:
+    0
+    42px;
+  border: 1px solid #e5e5e5;
+  outline: none;
+  background: #ffffff;
+  border-radius: 14px;
+  color: #222222;
+  font-size: 13px;
 }
 
-.course-card,
-.progress-card,
-.bank-card,
-.history-card,
-.link-card {
-  padding: 20px;
+.search-box input:focus {
+  border-color: #aaaaaa;
+}
+
+.search-box__icon {
+  position: absolute;
+  top: 50%;
+  left: 15px;
+  color: #999999;
+  transform:
+    translateY(-50%);
+}
+
+.search-box__clear {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #999999;
+  font-size: 20px;
+  cursor: pointer;
+  transform:
+    translateY(-50%);
+}
+
+.filter-select,
+.refresh-button {
+  height: 46px;
+  padding:
+    0
+    14px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  border-radius: 14px;
+  color: #555555;
+  font-size: 12px;
+}
+
+.refresh-button {
+  cursor: pointer;
+}
+
+.refresh-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.message {
+  margin-top: 14px;
+  padding: 12px 15px;
+  border-radius: 13px;
+  font-size: 12px;
+}
+
+.message--error {
+  background: #fff0f0;
+  color: #c94343;
+}
+
+.student-panel {
+  margin-top: 16px;
+  overflow: hidden;
   background: #ffffff;
   border: 1px solid #eeeeee;
   border-radius: 24px;
@@ -785,360 +1067,422 @@ onMounted(async () => {
     rgb(0 0 0 / 4%);
 }
 
-.course-card__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.course-card span,
-.progress-card span,
-.bank-card span,
-.section-title span {
-  color: #999999;
-  font-size: 11px;
-  letter-spacing: 0.8px;
-}
-
-.course-card h2 {
-  margin: 5px 0 0;
-  font-size: 21px;
-}
-
-.course-card p {
-  margin: 7px 0 0;
-  color: #777777;
-  font-size: 13px;
-}
-
-.cycle-badge {
-  flex: 0 0 auto;
+.student-list {
   padding:
-    7px
-    11px;
-  background: #f1f1f1;
-  border-radius: 999px;
-  color: #666666;
-  font-size: 12px;
+    4px
+    18px;
 }
 
-.progress-header {
+.student-row {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.progress-header > div:first-child {
-  display: flex;
-  flex-direction: column;
-}
-
-.progress-header strong {
-  margin-top: 4px;
-  font-size: 29px;
-}
-
-.remaining {
-  color: #777777;
-  font-size: 13px;
-}
-
-.remaining strong {
-  margin: 0 3px;
-  font-size: 20px;
-}
-
-.progress-track {
-  width: 100%;
-  height: 9px;
-  margin-top: 18px;
-  overflow: hidden;
-  background: #ededed;
-  border-radius: 999px;
-}
-
-.progress-value {
-  height: 100%;
-  background: #222222;
-  border-radius: inherit;
-  transition:
-    width
-    0.35s ease;
-}
-
-.progress-footer {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 9px;
-}
-
-.completed-notice {
-  margin-top: 16px;
-  padding: 12px;
-  background: #f7f7f7;
-  border-radius: 13px;
-  color: #666666;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.quick-actions {
-  display: grid;
-  grid-template-columns:
-    repeat(
-      2,
-      minmax(0, 1fr)
-    );
-  gap: 12px;
-}
-
-.quick-action {
-  display: flex;
-  flex-direction: column;
-  min-height: 128px;
-  padding: 17px;
-  background: #ffffff;
-  border: 1px solid #eeeeee;
-  border-radius: 20px;
+  align-items: center;
+  gap: 13px;
+  min-height: 78px;
+  padding:
+    10px
+    4px;
+  border-bottom: 1px solid #f0f0f0;
   color: inherit;
   text-decoration: none;
-  box-shadow:
-    0 7px 20px
-    rgb(0 0 0 / 3%);
+  transition:
+    background
+    0.15s ease;
 }
 
-.quick-action__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  margin-bottom: 15px;
-  background: #222222;
-  border-radius: 12px;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.quick-action strong {
-  font-size: 14px;
-}
-
-.quick-action small {
-  margin-top: 5px;
-  color: #999999;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.bank-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-}
-
-.bank-card h3 {
-  margin: 5px 0 0;
-  font-size: 16px;
-}
-
-.bank-detail {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.bank-detail strong {
-  margin-top: 5px;
-  font-size: 14px;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.section-title h2 {
-  margin: 4px 0 0;
-  font-size: 18px;
-}
-
-.section-title a {
-  color: #666666;
-  font-size: 12px;
-}
-
-.history-list {
-  margin-top: 14px;
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 50px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.history-item:last-child {
+.student-row:last-child {
   border-bottom: 0;
 }
 
-.history-date {
-  color: #777777;
-  font-size: 13px;
+.student-row:hover {
+  background: #fafafa;
 }
 
-.history-status {
-  padding:
-    5px
-    9px;
-  background: #f4f4f4;
-  border-radius: 999px;
-  font-size: 11px;
-}
-
-.empty-state {
-  padding:
-    36px
-    10px
-    20px;
-  color: #aaaaaa;
-  font-size: 13px;
-  text-align: center;
-}
-
-.link-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 28px 22px;
-  text-align: center;
-}
-
-.link-card__icon {
+.student-avatar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
-  background: #f3f3f3;
-  border-radius: 50%;
-  color: #555555;
-  font-size: 21px;
+  width: 45px;
+  height: 45px;
+  background: #f1f1f1;
+  border-radius: 15px;
+  color: #444444;
+  font-size: 14px;
   font-weight: 700;
 }
 
-.link-card h2 {
-  margin: 17px 0 0;
-  font-size: 19px;
-}
-
-.link-card p {
-  margin: 10px 0 0;
-  color: #777777;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.primary-link,
-.primary-button {
+.student-main {
+  min-width: 0;
+  flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 46px;
-  margin-top: 20px;
-  border: 0;
-  background: #222222;
-  border-radius: 14px;
-  color: #ffffff;
+  flex-direction: column;
+}
+
+.student-main strong {
+  overflow: hidden;
   font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.state-page {
+.student-main span {
+  margin-top: 5px;
+  color: #999999;
+  font-size: 12px;
+}
+
+.student-binding {
+  flex: 0 0 auto;
+}
+
+.binding-badge {
+  display: inline-flex;
+  padding:
+    6px
+    10px;
+  background: #f3f3f3;
+  border-radius: 999px;
+  color: #999999;
+  font-size: 11px;
+}
+
+.binding-badge--linked {
+  background: #eef8ee;
+  color: #4d9651;
+}
+
+.student-arrow {
+  flex: 0 0 auto;
+  color: #bbbbbb;
+  font-size: 22px;
+}
+
+.loading-state {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height:
-    calc(100vh - 80px);
-}
-
-.state-card {
-  width: 100%;
-  max-width: 360px;
-  padding: 32px 24px;
-  background: #ffffff;
-  border-radius: 24px;
-  text-align: center;
-  box-shadow:
-    0 18px 60px
-    rgb(0 0 0 / 8%);
-}
-
-.state-card h2 {
-  margin: 18px 0 0;
-  font-size: 19px;
-}
-
-.state-card p {
-  margin: 10px 0 0;
-  color: #777777;
-  font-size: 13px;
-  line-height: 1.7;
+  min-height: 280px;
+  color: #999999;
+  font-size: 12px;
 }
 
 .loader {
-  width: 42px;
-  height: 42px;
-  margin: 0 auto;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 15px;
   border: 4px solid #eeeeee;
   border-top-color: #222222;
   border-radius: 50%;
   animation:
-    loading 0.75s
+    loading
+    0.75s
     linear infinite;
 }
 
-.state-icon {
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  padding: 28px;
+  text-align: center;
+}
+
+.empty-state__icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
-  margin: 0 auto;
-  border-radius: 50%;
-  font-size: 22px;
+  width: 55px;
+  height: 55px;
+  background: #f1f1f1;
+  border-radius: 18px;
+  color: #777777;
+  font-size: 14px;
   font-weight: 700;
 }
 
-.state-icon--error {
-  background: #fff0f0;
+.empty-state h2 {
+  margin: 17px 0 0;
+  font-size: 18px;
+}
+
+.empty-state p {
+  margin: 8px 0 18px;
+  color: #999999;
+  font-size: 12px;
+}
+
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background:
+    rgb(
+      0 0 0 / 45%
+    );
+  backdrop-filter:
+    blur(3px);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  padding: 24px;
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow:
+    0 24px 70px
+    rgb(0 0 0 / 20%);
+}
+
+.dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.dialog__header span {
+  color: #999999;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.dialog__header h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+
+.dialog__close {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  background: #f3f3f3;
+  border-radius: 50%;
+  color: #777777;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  margin-top: 20px;
+}
+
+.form-group label {
+  margin-bottom: 7px;
+  color: #555555;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-group label span {
   color: #d94a4a;
+}
+
+.form-group input {
+  width: 100%;
+  height: 46px;
+  padding:
+    0
+    13px;
+  border: 1px solid #dddddd;
+  outline: none;
+  border-radius: 13px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  border-color: #999999;
+}
+
+.form-group small {
+  margin-top: 7px;
+  color: #aaaaaa;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dialog__actions {
+  display: grid;
+  grid-template-columns:
+    1fr 1fr;
+  gap: 10px;
+  margin-top: 25px;
+}
+
+.secondary-button,
+.primary-button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondary-button {
+  background: #f1f1f1;
+  color: #555555;
+}
+
+.primary-button {
+  background: #222222;
+  color: #ffffff;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  z-index: 1100;
+  max-width:
+    calc(
+      100vw - 32px
+    );
+  padding:
+    11px
+    20px;
+  background:
+    rgb(
+      20 20 20 / 92%
+    );
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 13px;
+  transform:
+    translateX(-50%);
+}
+
+.dialog-enter-active,
+.dialog-leave-active {
+  transition:
+    opacity
+    0.2s ease;
+}
+
+.dialog-enter-from,
+.dialog-leave-to {
+  opacity: 0;
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity
+    0.2s ease,
+    transform
+    0.2s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform:
+    translate(
+      -50%,
+      10px
+    );
 }
 
 @keyframes loading {
   to {
-    transform: rotate(360deg);
+    transform:
+      rotate(360deg);
+  }
+}
+
+@media (
+  max-width: 700px
+) {
+  .students-page {
+    padding:
+      18px
+      14px
+      40px;
+  }
+
+  .page-header {
+    align-items:
+      flex-start;
+  }
+
+  .page-header h1 {
+    font-size: 24px;
+  }
+
+  .summary-grid {
+    grid-template-columns:
+      repeat(
+        3,
+        minmax(0, 1fr)
+      );
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .search-box {
+    flex:
+      0 0 100%;
+  }
+
+  .filter-select {
+    flex: 1;
+  }
+
+  .student-binding {
+    display: none;
   }
 }
 
 @media (
   max-width: 480px
 ) {
-  .student-home {
+  .page-header {
+    flex-direction:
+      column;
+  }
+
+  .create-button {
+    width: 100%;
+  }
+
+  .summary-card {
+    min-height: 95px;
+    padding: 14px;
+  }
+
+  .summary-card span {
+    font-size: 10px;
+  }
+
+  .summary-card strong {
+    font-size: 23px;
+  }
+
+  .student-list {
     padding:
-      18px
-      14px
-      40px;
+      4px
+      12px;
+  }
+
+  .dialog {
+    padding: 20px;
   }
 }
 </style>
