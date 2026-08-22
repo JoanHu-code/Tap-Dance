@@ -262,6 +262,13 @@ const loginStudent = async () => {
 
     user.value =
       response.user || null
+    
+    const authStore =
+        useAuthStore()
+
+    authStore.setStudentLogin(
+        response
+    )  
 
     linked.value =
       Boolean(

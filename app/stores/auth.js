@@ -5,105 +5,450 @@ import {
 export const useAuthStore =
   defineStore(
     'auth',
-    {
-      state: () => ({
-        user: null,
+    () => {
+      // ======================================================
+      // State
+      // ======================================================
 
-        authenticated: false,
+      const user =
+        ref(null)
 
-        initialized: false,
+      const role =
+        ref(null)
 
-        loading: false,
+      const student =
+        ref(null)
 
-        error: null,
-      }),
+      const linked =
+        ref(false)
 
-      getters: {
-        isStudent:
-          (state) =>
-            state.user?.role ===
-            'STUDENT',
+      const initialized =
+        ref(false)
 
-        isTeacher:
-          (state) =>
-            state.user?.role ===
-            'TEACHER',
-      },
+      const loading =
+        ref(false)
 
-      actions: {
-        async checkSession() {
-          try {
-            const data =
-              await $fetch(
-                '/api/auth/me'
-              )
+      const error =
+        ref(null)
 
-            this.authenticated =
-              data.authenticated
+      // ======================================================
+      // Computed
+      // ======================================================
 
-            this.user =
-              data.user
-          } catch {
-            this.authenticated =
-              false
+      const isAuthenticated =
+        computed(() => {
+          return Boolean(
+            user.value
+          )
+        })
 
-            this.user =
-              null
-          }
-        },
+      const isTeacher =
+        computed(() => {
+          return (
+            role.value ===
+            'TEACHER'
+          )
+        })
 
-        async loginWithLineToken(
-          idToken,
-          linkCode = null
-        ) {
-          const result =
-            await $fetch(
-              '/api/auth/line',
-              {
-                method:
-                  'POST',
+      const isStudent =
+        computed(() => {
+          return (
+            role.value ===
+            'STUDENT'
+          )
+        })
 
-                body: {
-                  idToken,
-                  linkCode,
-                },
-              }
-            )
+      const displayName =
+        computed(() => {
+          return (
+            student.value
+              ?.name ||
+            user.value
+              ?.display_name ||
+            ''
+          )
+        })
 
-          if (
-            result.authorized
-          ) {
-            this.authenticated =
-              true
+      const pictureUrl =
+        computed(() => {
+          return (
+            user.value
+              ?.picture_url ||
+            null
+          )
+        })
 
-            this.user =
-              result.user
-          } else {
-            this.authenticated =
-              false
+      // ======================================================
+      // 清除登入狀態
+      // ======================================================
 
-            this.user =
-              null
-          }
+      const clearAuth = () => {
+        user.value = null
 
-          return result
-        },
+        role.value = null
 
-        async logout() {
-          await $fetch(
-            '/api/auth/logout',
-            {
-              method:
-                'POST',
-            }
+        student.value = null
+
+        linked.value = false
+
+        initialized.value =
+          false
+
+        error.value = null
+      }
+
+      // ======================================================
+      // 設定 Auth
+      // ======================================================
+
+      const setAuth = (
+        payload
+      ) => {
+        user.value =
+          payload?.user ||
+          null
+
+        role.value =
+          payload?.role ||
+          payload?.user
+            ?.role ||
+          null
+
+        student.value =
+          payload?.student ||
+          null
+
+        linked.value =
+          Boolean(
+            payload?.linked
           )
 
-          this.authenticated =
-            false
+        initialized.value =
+          true
 
-          this.user =
-            null
-        },
-      },
+        error.value = null
+      }
+
+      // ======================================================
+      // 取得 SSR Cookie Header
+      // ======================================================
+
+      const getRequestOptions =
+        () => {
+          if (
+            import.meta.client
+          ) {
+            return {}
+          }
+
+          const headers =
+            useRequestHeaders([
+              'cookie',
+            ])
+
+          return {
+            headers,
+          }
+        }
+
+      // ======================================================
+      // 檢查老師 Session
+      // ======================================================
+
+      const fetchTeacherMe =
+        async ({
+          force = false,
+        } = {}) => {
+          if (
+            loading.value
+          ) {
+            return {
+              success: false,
+            }
+          }
+
+          if (
+            !force &&
+            initialized.value &&
+            isTeacher.value
+          ) {
+            return {
+              success: true,
+
+              user:
+                user.value,
+
+              role:
+                role.value,
+            }
+          }
+
+          loading.value = true
+
+          error.value = null
+
+          try {
+            const response =
+              await $fetch(
+                '/api/auth/teacher/me',
+                getRequestOptions()
+              )
+
+            setAuth(
+              response
+            )
+
+            return response
+          } catch (
+            requestError
+          ) {
+            clearAuth()
+
+            error.value =
+              requestError
+
+            return {
+              success: false,
+
+              error:
+                requestError,
+            }
+          } finally {
+            loading.value =
+              false
+          }
+        }
+
+      // ======================================================
+      // 檢查學生 Session
+      // ======================================================
+
+      const fetchStudentMe =
+        async ({
+          force = false,
+        } = {}) => {
+          if (
+            loading.value
+          ) {
+            return {
+              success: false,
+            }
+          }
+
+          if (
+            !force &&
+            initialized.value &&
+            isStudent.value
+          ) {
+            return {
+              success: true,
+
+              user:
+                user.value,
+
+              role:
+                role.value,
+
+              student:
+                student.value,
+
+              linked:
+                linked.value,
+            }
+          }
+
+          loading.value = true
+
+          error.value = null
+
+          try {
+            const response =
+              await $fetch(
+                '/api/auth/student/me',
+                getRequestOptions()
+              )
+
+            setAuth(
+              response
+            )
+
+            return response
+          } catch (
+            requestError
+          ) {
+            clearAuth()
+
+            error.value =
+              requestError
+
+            return {
+              success: false,
+
+              error:
+                requestError,
+            }
+          } finally {
+            loading.value =
+              false
+          }
+        }
+
+      // ======================================================
+      // Teacher LIFF 登入完成後寫入 Store
+      // ======================================================
+
+      const setTeacherLogin =
+        (
+          payload
+        ) => {
+          setAuth({
+            user:
+              payload?.user,
+
+            role:
+              'TEACHER',
+
+            linked:
+              false,
+
+            student:
+              null,
+          })
+        }
+
+      // ======================================================
+      // Student LIFF 登入完成後寫入 Store
+      // ======================================================
+
+      const setStudentLogin =
+        (
+          payload
+        ) => {
+          setAuth({
+            user:
+              payload?.user,
+
+            role:
+              'STUDENT',
+
+            linked:
+              payload
+                ?.linked,
+
+            student:
+              payload
+                ?.student,
+          })
+        }
+
+      // ======================================================
+      // 登出
+      // ======================================================
+
+      const logout =
+        async () => {
+          const currentRole =
+            role.value
+
+          try {
+            await $fetch(
+              '/api/auth/logout',
+              {
+                method: 'POST',
+              }
+            )
+          } catch (
+            requestError
+          ) {
+            console.error(
+              '登出 Session 失敗：',
+              requestError
+            )
+          }
+
+          clearAuth()
+
+          if (
+            import.meta.client
+          ) {
+            try {
+              const {
+                $liff,
+              } =
+                useNuxtApp()
+
+              if (
+                $liff
+                  ?.isLoggedIn?.()
+              ) {
+                $liff.logout()
+              }
+            } catch (
+              liffError
+            ) {
+              console.error(
+                'LIFF 登出失敗：',
+                liffError
+              )
+            }
+          }
+
+          if (
+            currentRole ===
+            'TEACHER'
+          ) {
+            return navigateTo(
+              '/teacher'
+            )
+          }
+
+          return navigateTo(
+            '/student'
+          )
+        }
+
+      // ======================================================
+      // Return
+      // ======================================================
+
+      return {
+        user,
+
+        role,
+
+        student,
+
+        linked,
+
+        initialized,
+
+        loading,
+
+        error,
+
+        isAuthenticated,
+
+        isTeacher,
+
+        isStudent,
+
+        displayName,
+
+        pictureUrl,
+
+        clearAuth,
+
+        setAuth,
+
+        setTeacherLogin,
+
+        setStudentLogin,
+
+        fetchTeacherMe,
+
+        fetchStudentMe,
+
+        logout,
+      }
     }
   )

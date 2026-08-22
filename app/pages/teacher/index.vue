@@ -144,6 +144,13 @@ const loginTeacher = async () => {
     teacher.value =
       response.user || null
 
+    const authStore =
+     useAuthStore()
+
+    authStore.setTeacherLogin(
+        response
+    )
+
     students.value =
       response.dashboard
         ?.students || []
