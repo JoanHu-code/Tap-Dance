@@ -92,21 +92,9 @@ export default defineEventHandler(
               )
                 .toLowerCase()
 
-            const phone =
-              String(
-                student.phone ||
-                ''
-              )
-                .toLowerCase()
-
-            return (
-              name.includes(
+                return name.includes(
                 keyword
-              ) ||
-              phone.includes(
-                keyword
-              )
-            )
+                )
           }
         )
     }

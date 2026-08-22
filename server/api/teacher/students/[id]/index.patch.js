@@ -12,7 +12,28 @@ export default defineEventHandler(
       throw createError({
         statusCode: 403,
         statusMessage:
-          '只有老師可以新增學生',
+          '只有老師可以修改學生資料',
+      })
+    }
+
+    const studentId =
+      Number(
+        getRouterParam(
+          event,
+          'id'
+        )
+      )
+
+    if (
+      !studentId ||
+      Number.isNaN(
+        studentId
+      )
+    ) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          '學生 ID 不正確',
       })
     }
 
@@ -31,7 +52,7 @@ export default defineEventHandler(
       throw createError({
         statusCode: 400,
         statusMessage:
-          '請輸入學生姓名',
+          '學生姓名不可為空',
       })
     }
 
@@ -48,53 +69,51 @@ export default defineEventHandler(
     const sql =
       useDatabase()
 
-    const organizations =
+    const oldStudents =
       await sql`
         SELECT
-          id
+          *
 
-        FROM organizations
+        FROM students
 
-        ORDER BY
-          id ASC
+        WHERE
+          id =
+            ${studentId}
 
         LIMIT 1
       `
 
     if (
-      !organizations.length
+      !oldStudents.length
     ) {
       throw createError({
-        statusCode: 500,
+        statusCode: 404,
         statusMessage:
-          '目前尚未建立教室資料',
+          '找不到學生資料',
       })
     }
 
-    const organizationId =
-      organizations[0].id
+    const beforeData =
+      oldStudents[0]
 
-    const inserted =
+    const updated =
       await sql`
-        INSERT INTO
-          students (
-            organization_id,
-            user_id,
-            name
-          )
+        UPDATE students
 
-        VALUES (
-          ${organizationId},
-          NULL,
-          ${name}
-        )
+        SET
+          name =
+            ${name}
+
+        WHERE
+          id =
+            ${studentId}
 
         RETURNING
           *
       `
 
     const student =
-      inserted[0]
+      updated[0]
 
     try {
       await sql`
@@ -114,13 +133,15 @@ export default defineEventHandler(
         VALUES (
           ${user.id},
           'TEACHER',
-          'CREATE',
+          'UPDATE',
           'STUDENT',
           ${String(
-            student.id
+            studentId
           )},
-          ${student.id},
-          NULL,
+          ${studentId},
+          ${JSON.stringify(
+            beforeData
+          )}::jsonb,
           ${JSON.stringify(
             student
           )}::jsonb,
@@ -129,7 +150,7 @@ export default defineEventHandler(
       `
     } catch (error) {
       console.warn(
-        '新增學生 Audit Log 寫入失敗：',
+        'Student Audit Log 寫入失敗：',
         error?.message
       )
     }
@@ -138,7 +159,7 @@ export default defineEventHandler(
       success: true,
 
       message:
-        '學生建立成功',
+        '學生資料更新成功',
 
       student,
     }
