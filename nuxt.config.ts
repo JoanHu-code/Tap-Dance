@@ -6,13 +6,31 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
     modules: ["@pinia/nuxt"],
   imports: {
-    dirs: ["stores"],
+    dirs: ["stores", 'composables'],
   },
  runtimeConfig: {
     lineChannelId: '',
 
     public: {
+      teacherLiffId: '',
+      studentLiffId: '',
       liffId: '',
+    },
+  },
+    app: {
+    head: {
+      title: 'TapLife 課程管理系統',
+
+      meta: [
+        {
+          name: 'viewport',
+          content: 'width=device-width, initial-scale=1',
+        },
+        {
+          name: 'theme-color',
+          content: '#ffffff',
+        },
+      ],
     },
   },
 })
