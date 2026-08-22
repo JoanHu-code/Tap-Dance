@@ -1,6 +1,7 @@
 <script setup>
 definePageMeta({
-  middleware: 'teacher-auth',
+  middleware:
+    'teacher-auth',
 })
 
 const route =
@@ -9,7 +10,8 @@ const route =
 const studentId =
   computed(() => {
     return String(
-      route.params.id || ''
+      route.params.id ||
+      ''
     )
   })
 
@@ -20,9 +22,6 @@ const saving =
   ref(false)
 
 const enrollmentSaving =
-  ref(false)
-
-const linkCodeLoading =
   ref(false)
 
 const errorMessage =
@@ -43,25 +42,16 @@ const packages =
 const attendanceRecords =
   ref([])
 
-const auditLogs =
-  ref([])
-
 const availableCourses =
   ref([])
 
 const availableSchedules =
   ref([])
 
-const latestLinkCode =
-  ref(null)
-
 const showEditDialog =
   ref(false)
 
 const showEnrollmentDialog =
-  ref(false)
-
-const showLinkDialog =
   ref(false)
 
 const editForm =
@@ -78,225 +68,110 @@ const enrollmentForm =
 let toastTimer =
   null
 
+// ============================================================
+// Name
+// ============================================================
+
 const studentName =
   computed(() => {
     return (
-      student.value?.name ||
+      student.value
+        ?.name ||
       `學生 #${studentId.value}`
     )
   })
 
+// ============================================================
+// LINE
+// ============================================================
+
 const isLineLinked =
   computed(() => {
     return Boolean(
-      student.value?.user_id
+      student.value
+        ?.user_id
     )
   })
 
-const activePackages =
-  computed(() => {
-    return packages.value.filter(
-      (item) => {
-        return (
-          item.status ===
-          'ACTIVE'
-        )
-      }
-    )
-  })
+// ============================================================
+// Weekday
+// ============================================================
 
-const selectedCourseSchedules =
-  computed(() => {
-    if (
-      !enrollmentForm
-        .courseId
-    ) {
-      return []
+const getWeekdayLabel =
+  (
+    weekday
+  ) => {
+    const map = {
+      1: '星期一',
+      2: '星期二',
+      3: '星期三',
+      4: '星期四',
+      5: '星期五',
+      6: '星期六',
+      7: '星期日',
     }
 
-    return availableSchedules.value
-      .filter(
-        (schedule) => {
-          return (
-            Number(
-              schedule.course_id
-            ) ===
-            Number(
-              enrollmentForm
-                .courseId
-            )
-          )
-        }
+    return (
+      map[
+        Number(
+          weekday
+        )
+      ] ||
+      ''
+    )
+  }
+
+// ============================================================
+// Money
+// ============================================================
+
+const formatMoney =
+  (
+    value
+  ) => {
+    return new Intl
+      .NumberFormat(
+        'zh-TW'
       )
-  })
-
-const formatMoney = (
-  value
-) => {
-  return new Intl
-    .NumberFormat(
-      'zh-TW'
-    )
-    .format(
-      Number(
-        value || 0
+      .format(
+        Number(
+          value || 0
+        )
       )
-    )
-}
-
-const formatDate = (
-  value
-) => {
-  if (!value) {
-    return '-'
   }
 
-  const date =
-    new Date(value)
+// ============================================================
+// Toast
+// ============================================================
 
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return String(value)
-  }
-
-  return new Intl
-    .DateTimeFormat(
-      'zh-TW',
-      {
-        timeZone:
-          'Asia/Taipei',
-
-        year:
-          'numeric',
-
-        month:
-          '2-digit',
-
-        day:
-          '2-digit',
-      }
-    )
-    .format(date)
-}
-
-const formatDateTime = (
-  value
-) => {
-  if (!value) {
-    return '-'
-  }
-
-  const date =
-    new Date(value)
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return String(value)
-  }
-
-  return new Intl
-    .DateTimeFormat(
-      'zh-TW',
-      {
-        timeZone:
-          'Asia/Taipei',
-
-        year:
-          'numeric',
-
-        month:
-          '2-digit',
-
-        day:
-          '2-digit',
-
-        hour:
-          '2-digit',
-
-        minute:
-          '2-digit',
-
-        hour12:
-          false,
-      }
-    )
-    .format(date)
-}
-
-const getWeekdayLabel = (
-  weekday
-) => {
-  const map = {
-    0: '星期日',
-    1: '星期一',
-    2: '星期二',
-    3: '星期三',
-    4: '星期四',
-    5: '星期五',
-    6: '星期六',
-  }
-
-  return (
-    map[
-      Number(weekday)
-    ] ||
-    String(
-      weekday ?? ''
-    )
-  )
-}
-
-const getAttendanceLabel = (
-  status
-) => {
-  const map = {
-    ATTENDED:
-      '已上課',
-
-    LEAVE:
-      '請假',
-
-    ABSENT:
-      '缺席',
-
-    CANCELLED:
-      '已取消',
-  }
-
-  return (
-    map[status] ||
-    status ||
-    '-'
-  )
-}
-
-const showToast = (
-  text
-) => {
-  successMessage.value =
+const showToast =
+  (
     text
+  ) => {
+    successMessage.value =
+      text
 
-  if (toastTimer) {
-    window.clearTimeout(
+    if (
       toastTimer
-    )
+    ) {
+      window.clearTimeout(
+        toastTimer
+      )
+    }
+
+    toastTimer =
+      window.setTimeout(
+        () => {
+          successMessage.value =
+            ''
+        },
+        2400
+      )
   }
 
-  toastTimer =
-    window.setTimeout(
-      () => {
-        successMessage.value =
-          ''
-      },
-      2200
-    )
-}
+// ============================================================
+// Fetch
+// ============================================================
 
 const fetchStudent =
   async () => {
@@ -313,43 +188,34 @@ const fetchStudent =
         )
 
       student.value =
-        response?.student ||
+        response.student ||
         null
 
       enrollments.value =
-        response?.enrollments ||
+        response.enrollments ||
         []
 
       packages.value =
-        response?.packages ||
+        response.packages ||
         []
 
       attendanceRecords.value =
         response
-          ?.attendanceRecords ||
-        []
-
-      auditLogs.value =
-        response?.auditLogs ||
+          .attendanceRecords ||
         []
 
       availableCourses.value =
         response
-          ?.availableCourses ||
+          .availableCourses ||
         []
 
       availableSchedules.value =
         response
-          ?.availableSchedules ||
+          .availableSchedules ||
         []
-
-      latestLinkCode.value =
-        response
-          ?.latestLinkCode ||
-        null
     } catch (error) {
       console.error(
-        '取得學生詳情失敗：',
+        '學生詳情載入失敗：',
         error
       )
 
@@ -365,34 +231,26 @@ const fetchStudent =
     }
   }
 
+// ============================================================
+// Edit Student
+// ============================================================
+
 const openEditDialog =
   () => {
     editForm.name =
-      student.value?.name ||
+      student.value
+        ?.name ||
       ''
 
     showEditDialog.value =
       true
   }
 
-const closeEditDialog =
-  () => {
-    if (saving.value) {
-      return
-    }
-
-    showEditDialog.value =
-      false
-  }
-
 const saveStudent =
   async () => {
-    if (saving.value) {
-      return
-    }
-
     const name =
-      editForm.name.trim()
+      editForm.name
+        .trim()
 
     if (!name) {
       errorMessage.value =
@@ -404,80 +262,77 @@ const saveStudent =
     saving.value =
       true
 
-    errorMessage.value =
-      ''
-
     try {
-      const response =
-        await $fetch(
-          `/api/teacher/students/${studentId.value}`,
-          {
-            method:
-              'PATCH',
+      await $fetch(
+        `/api/teacher/students/${studentId.value}`,
+        {
+          method:
+            'PATCH',
 
-            body: {
-              name,
-            },
-          }
-        )
-
-      student.value =
-        response.student
+          body: {
+            name,
+          },
+        }
+      )
 
       showEditDialog.value =
         false
 
       showToast(
-        response.message ||
         '學生資料更新成功'
       )
-    } catch (error) {
-      console.error(
-        '更新學生失敗：',
-        error
-      )
 
+      await fetchStudent()
+    } catch (error) {
       errorMessage.value =
         error?.data
           ?.statusMessage ||
-        error?.statusMessage ||
         error?.message ||
-        '學生資料更新失敗'
+        '更新失敗'
     } finally {
       saving.value =
         false
     }
   }
 
-const openEnrollmentDialog =
-  () => {
-    enrollmentForm.courseId =
-      ''
+// ============================================================
+// Course Schedules
+// ============================================================
 
-    enrollmentForm.scheduleId =
-      ''
-
-    showEnrollmentDialog.value =
-      true
-  }
-
-const closeEnrollmentDialog =
-  () => {
+const selectedCourseSchedules =
+  computed(() => {
     if (
-      enrollmentSaving.value
+      !enrollmentForm
+        .courseId
     ) {
-      return
+      return []
     }
 
-    showEnrollmentDialog.value =
-      false
-  }
+    return availableSchedules.value
+      .filter(
+        (
+          schedule
+        ) => {
+          return (
+            String(
+              schedule.course_id
+            ) ===
+            String(
+              enrollmentForm
+                .courseId
+            )
+          )
+        }
+      )
+  })
 
-const handleCourseChange =
-  () => {
-    enrollmentForm.scheduleId =
-      ''
-  }
+// ============================================================
+// Create Enrollment
+//
+// 目前第一次建立仍先指定一個 Primary。
+// 建完之後即可使用下面多 Schedule Editor
+// 加入第二、第三個固定時段。
+// ============================================================
 
 const createEnrollment =
   async () => {
@@ -491,64 +346,44 @@ const createEnrollment =
       !enrollmentForm
         .courseId
     ) {
-      errorMessage.value =
-        '請選擇課程'
-
       return
     }
 
     enrollmentSaving.value =
       true
 
-    errorMessage.value =
-      ''
-
     try {
-      const response =
-        await $fetch(
-          `/api/teacher/students/${studentId.value}/enrollments`,
-          {
-            method:
-              'POST',
+      await $fetch(
+        `/api/teacher/students/${studentId.value}/enrollments`,
+        {
+          method:
+            'POST',
 
-            body: {
-              courseId:
-                Number(
-                  enrollmentForm
-                    .courseId
-                ),
+          body: {
+            courseId:
+              enrollmentForm
+                .courseId,
 
-              scheduleId:
-                enrollmentForm
-                  .scheduleId
-                  ? Number(
-                      enrollmentForm
-                        .scheduleId
-                    )
-                  : null,
-            },
-          }
-        )
+            scheduleId:
+              enrollmentForm
+                .scheduleId ||
+              null,
+          },
+        }
+      )
 
       showEnrollmentDialog.value =
         false
 
       showToast(
-        response.message ||
         '學生已加入課程'
       )
 
       await fetchStudent()
     } catch (error) {
-      console.error(
-        '建立 Enrollment 失敗：',
-        error
-      )
-
       errorMessage.value =
         error?.data
           ?.statusMessage ||
-        error?.statusMessage ||
         error?.message ||
         '加入課程失敗'
     } finally {
@@ -557,74 +392,49 @@ const createEnrollment =
     }
   }
 
-const generateLinkCode =
+// ============================================================
+// Schedule Updated
+// ============================================================
+
+const handleSchedulesUpdated =
   async () => {
-    if (
-      linkCodeLoading.value ||
-      isLineLinked.value
-    ) {
-      return
-    }
+    showToast(
+      '固定班別已更新'
+    )
 
-    linkCodeLoading.value =
-      true
-
-    errorMessage.value =
-      ''
-
-    try {
-      const response =
-        await $fetch(
-          `/api/teacher/students/${studentId.value}/link-code`,
-          {
-            method:
-              'POST',
-          }
-        )
-
-      latestLinkCode.value =
-        response.linkCode
-
-      showLinkDialog.value =
-        true
-    } catch (error) {
-      console.error(
-        '產生綁定碼失敗：',
-        error
-      )
-
-      errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.statusMessage ||
-        error?.message ||
-        '產生綁定碼失敗'
-    } finally {
-      linkCodeLoading.value =
-        false
-    }
+    await fetchStudent()
   }
 
-const copyLinkCode =
-  async () => {
-    const code =
-      latestLinkCode.value
-        ?.code
+// ============================================================
+// Package for Course
+// ============================================================
 
-    if (!code) {
-      return
-    }
-
-    await navigator
-      .clipboard
-      .writeText(
-        code
-      )
-
-    showToast(
-      '綁定碼已複製'
+const getLatestPackage =
+  (
+    courseId
+  ) => {
+    return (
+      packages.value.find(
+        (
+          item
+        ) => {
+          return (
+            String(
+              item.course_id
+            ) ===
+            String(
+              courseId
+            )
+          )
+        }
+      ) ||
+      null
     )
   }
+
+// ============================================================
+// Mounted
+// ============================================================
 
 onMounted(
   async () => {
@@ -634,7 +444,9 @@ onMounted(
 
 onBeforeUnmount(
   () => {
-    if (toastTimer) {
+    if (
+      toastTimer
+    ) {
       window.clearTimeout(
         toastTimer
       )
@@ -644,112 +456,144 @@ onBeforeUnmount(
 </script>
 
 <template>
-  <main class="student-detail-page">
-    <div class="detail-container">
+  <main
+    class="
+      student-detail-page
+    "
+  >
+    <div
+      class="
+        container
+      "
+    >
       <div
-        v-if="loading"
-        class="loading-state"
+        v-if="
+          loading
+        "
+        class="
+          loading-page
+        "
       >
-        <div class="loader" />
+        <div
+          class="
+            loader
+          "
+        />
 
         <span>
-          正在載入學生資料
+          載入學生資料
         </span>
       </div>
 
       <template
-        v-else-if="student"
+        v-else-if="
+          student
+        "
       >
-        <header class="page-header">
+        <header
+          class="
+            header
+          "
+        >
           <div>
             <NuxtLink
-              to="/teacher/students"
-              class="back-link"
+              to="
+                /teacher/students
+              "
+              class="
+                back-link
+              "
             >
               ← 學生列表
             </NuxtLink>
 
-            <span class="eyebrow">
-              Student Detail
+            <span
+              class="
+                eyebrow
+              "
+            >
+              Student
             </span>
 
             <h1>
-              {{ studentName }}
+              {{
+                studentName
+              }}
             </h1>
 
             <p>
-              學生課程、方案與歷史紀錄
+              課程、固定班別、Package 與歷史紀錄
             </p>
           </div>
 
           <button
             type="button"
             class="
-              primary-button
-              header-button
+              black-button
             "
             @click="
               openEditDialog
             "
           >
-            編輯資料
+            編輯姓名
           </button>
         </header>
 
-        <section class="summary-grid">
-          <article class="summary-card">
+        <div
+          v-if="
+            errorMessage
+          "
+          class="
+            error-message
+          "
+        >
+          {{
+            errorMessage
+          }}
+        </div>
+
+        <!-- ==================================================
+             Overview
+             ================================================== -->
+
+        <section
+          class="
+            overview-grid
+          "
+        >
+          <article>
             <span>
-              目前課程
+              課程
             </span>
 
             <strong>
-              {{ enrollments.length }}
+              {{
+                enrollments.length
+              }}
             </strong>
-
-            <small>
-              Enrollment
-            </small>
           </article>
 
-          <article class="summary-card">
+          <article>
             <span>
-              Active Package
+              Package
             </span>
 
             <strong>
-              {{ activePackages.length }}
+              {{
+                packages.length
+              }}
             </strong>
-
-            <small>
-              目前進行中
-            </small>
           </article>
 
-          <article class="summary-card">
-            <span>
-              上課紀錄
-            </span>
-
-            <strong>
-              {{ attendanceRecords.length }}
-            </strong>
-
-            <small>
-              最近資料
-            </small>
-          </article>
-
-          <article class="summary-card">
+          <article>
             <span>
               LINE
             </span>
 
             <strong
-              class="status-text"
-              :class="{
-                'status-text--linked':
-                  isLineLinked,
-              }"
+              class="
+                small-status
+              "
             >
               {{
                 isLineLinked
@@ -757,164 +601,42 @@ onBeforeUnmount(
                   : '未綁定'
               }}
             </strong>
-
-            <small>
-              學生端帳號
-            </small>
           </article>
         </section>
 
-        <section class="content-grid">
-          <article class="panel">
-            <div class="panel__header">
-              <div>
-                <span>
-                  Profile
-                </span>
-
-                <h2>
-                  基本資料
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                class="text-button"
-                @click="
-                  openEditDialog
-                "
-              >
-                修改
-              </button>
-            </div>
-
-            <div class="info-list">
-              <div class="info-row">
-                <span>
-                  姓名
-                </span>
-
-                <strong>
-                  {{
-                    student.name ||
-                    '-'
-                  }}
-                </strong>
-              </div>
-
-              <div class="info-row">
-                <span>
-                  Student ID
-                </span>
-
-                <strong>
-                  {{ student.id }}
-                </strong>
-              </div>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="panel__header">
-              <div>
-                <span>
-                  LINE
-                </span>
-
-                <h2>
-                  LINE 綁定
-                </h2>
-              </div>
-            </div>
-
-            <div
-              v-if="isLineLinked"
-              class="
-                line-status
-                line-status--linked
-              "
-            >
-              <div class="line-status__icon">
-                ✓
-              </div>
-
-              <div>
-                <strong>
-                  已完成 LINE 綁定
-                </strong>
-
-                <span>
-                  學生可以從學生 LIFF 查看自己的資料。
-                </span>
-              </div>
-            </div>
-
-            <div
-              v-else
-              class="line-status"
-            >
-              <div class="line-status__icon">
-                !
-              </div>
-
-              <div>
-                <strong>
-                  尚未綁定 LINE
-                </strong>
-
-                <span>
-                  可以產生一次性綁定碼交給學生。
-                </span>
-              </div>
-
-              <button
-                type="button"
-                class="
-                  primary-button
-                  link-code-button
-                "
-                :disabled="
-                  linkCodeLoading
-                "
-                @click="
-                  generateLinkCode
-                "
-              >
-                {{
-                  linkCodeLoading
-                    ? '產生中...'
-                    : '產生綁定碼'
-                }}
-              </button>
-            </div>
-          </article>
-        </section>
+        <!-- ==================================================
+             Enrollments
+             ================================================== -->
 
         <section
           class="
-            panel
-            section-panel
+            main-panel
           "
         >
-          <div class="panel__header">
+          <div
+            class="
+              panel-header
+            "
+          >
             <div>
               <span>
                 Enrollment
               </span>
 
               <h2>
-                學生課程
+                學生課程與固定班別
               </h2>
             </div>
 
             <button
               type="button"
               class="
-                primary-button
-                small-button
+                black-button
+                small
               "
               @click="
-                openEnrollmentDialog
+                showEnrollmentDialog =
+                  true
               "
             >
               ＋ 加入課程
@@ -925,9 +647,11 @@ onBeforeUnmount(
             v-if="
               enrollments.length
             "
-            class="enrollment-list"
+            class="
+              enrollment-list
+            "
           >
-            <div
+            <article
               v-for="
                 enrollment in
                   enrollments
@@ -935,436 +659,488 @@ onBeforeUnmount(
               :key="
                 enrollment.id
               "
-              class="enrollment-row"
+              class="
+                enrollment-card
+              "
             >
-              <div class="enrollment-icon">
-                ♪
-              </div>
+              <div
+                class="
+                  enrollment-heading
+                "
+              >
+                <div>
+                  <span>
+                    Course
+                  </span>
 
-              <div class="enrollment-main">
-                <strong>
-                  {{
-                    enrollment.course_name ||
-                    `課程 #${enrollment.course_id}`
-                  }}
-                </strong>
+                  <h3>
+                    {{
+                      enrollment
+                        .course_name
+                    }}
+                  </h3>
+                </div>
 
                 <span
-                  v-if="
-                    enrollment.schedule_weekday !==
-                    null &&
-                    enrollment.schedule_weekday !==
-                    undefined
+                  class="
+                    status-pill
                   "
                 >
                   {{
-                    getWeekdayLabel(
-                      enrollment.schedule_weekday
-                    )
+                    enrollment.status
                   }}
-
-                  {{
-                    String(
-                      enrollment.schedule_start_time ||
-                      ''
-                    ).slice(
-                      0,
-                      5
-                    )
-                  }}
-                </span>
-
-                <span v-else>
-                  未設定預設班別
                 </span>
               </div>
-            </div>
+
+              <!-- ============================================
+                   Current Schedules
+                   ============================================ -->
+
+              <div
+                class="
+                  current-schedules
+                "
+              >
+                <span
+                  class="
+                    subsection-title
+                  "
+                >
+                  目前固定班別
+                </span>
+
+                <div
+                  v-if="
+                    enrollment
+                      .schedules
+                      ?.length
+                  "
+                  class="
+                    schedule-chips
+                  "
+                >
+                  <span
+                    v-for="
+                      schedule in
+                        enrollment
+                          .schedules
+                    "
+                    :key="
+                      schedule.schedule_id
+                    "
+                    class="
+                      schedule-chip
+                    "
+                    :class="{
+                      'schedule-chip--primary':
+                        schedule.is_primary,
+                    }"
+                  >
+                    {{
+                      getWeekdayLabel(
+                        schedule.weekday
+                      )
+                    }}
+
+                    {{
+                      String(
+                        schedule.start_time ||
+                        ''
+                      )
+                        .slice(
+                          0,
+                          5
+                        )
+                    }}
+
+                    <small
+                      v-if="
+                        schedule.is_primary
+                      "
+                    >
+                      主要
+                    </small>
+                  </span>
+                </div>
+
+                <span
+                  v-else
+                  class="
+                    no-schedule
+                  "
+                >
+                  尚未設定固定時段
+                </span>
+              </div>
+
+              <!-- ============================================
+                   Editor
+                   ============================================ -->
+
+              <EnrollmentScheduleEditor
+                :enrollment="
+                  enrollment
+                "
+                :available-schedules="
+                  availableSchedules
+                "
+                :student-id="
+                  studentId
+                "
+                @updated="
+                  handleSchedulesUpdated
+                "
+              />
+
+              <!-- ============================================
+                   Package
+                   ============================================ -->
+
+              <div
+                v-if="
+                  getLatestPackage(
+                    enrollment
+                      .course_id
+                  )
+                "
+                class="
+                  package-summary
+                "
+              >
+                <div>
+                  <span>
+                    Package
+                  </span>
+
+                  <strong>
+                    第
+                    {{
+                      getLatestPackage(
+                        enrollment
+                          .course_id
+                      )
+                        .cycle_no ||
+                      1
+                    }}
+                    期
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    堂數
+                  </span>
+
+                  <strong>
+                    {{
+                      getLatestPackage(
+                        enrollment
+                          .course_id
+                      )
+                        .attended_count ||
+                      0
+                    }}
+                    /
+                    {{
+                      getLatestPackage(
+                        enrollment
+                          .course_id
+                      )
+                        .total_sessions
+                    }}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    價格
+                  </span>
+
+                  <strong>
+                    NT$
+                    {{
+                      formatMoney(
+                        getLatestPackage(
+                          enrollment
+                            .course_id
+                        )
+                          .price
+                      )
+                    }}
+                  </strong>
+                </div>
+              </div>
+            </article>
           </div>
 
           <div
             v-else
-            class="empty-state"
+            class="
+              empty-state
+            "
           >
             尚未加入任何課程
-          </div>
-        </section>
-
-        <section
-          class="
-            panel
-            section-panel
-          "
-        >
-          <div class="panel__header">
-            <div>
-              <span>
-                Package
-              </span>
-
-              <h2>
-                堂數方案
-              </h2>
-            </div>
-          </div>
-
-          <div
-            v-if="
-              packages.length
-            "
-            class="package-list"
-          >
-            <div
-              v-for="
-                item in packages
-              "
-              :key="item.id"
-              class="package-card"
-            >
-              <div>
-                <span>
-                  第
-                  {{
-                    item.cycle_no ||
-                    1
-                  }}
-                  期
-                </span>
-
-                <strong>
-                  {{
-                    item.total_sessions
-                  }}
-                  堂
-                </strong>
-              </div>
-
-              <div class="package-card__right">
-                <span>
-                  NT$
-                  {{
-                    formatMoney(
-                      item.price
-                    )
-                  }}
-                </span>
-
-                <strong>
-                  {{ item.status }}
-                </strong>
-              </div>
-            </div>
-          </div>
-
-          <div
-            v-else
-            class="empty-state"
-          >
-            尚未建立堂數方案
           </div>
         </section>
       </template>
     </div>
 
-    <Teleport to="body">
-      <Transition name="dialog">
-        <div
-          v-if="showEditDialog"
-          class="dialog-mask"
-          @click.self="
-            closeEditDialog
+    <!-- ======================================================
+         Edit Dialog
+         ====================================================== -->
+
+    <Teleport
+      to="body"
+    >
+      <div
+        v-if="
+          showEditDialog
+        "
+        class="
+          dialog-mask
+        "
+        @click.self="
+          showEditDialog =
+            false
+        "
+      >
+        <form
+          class="
+            dialog
+          "
+          @submit.prevent="
+            saveStudent
           "
         >
-          <form
-            class="dialog"
-            @submit.prevent="
-              saveStudent
+          <h2>
+            修改學生姓名
+          </h2>
+
+          <label>
+            姓名
+          </label>
+
+          <input
+            v-model="
+              editForm.name
+            "
+            type="text"
+            maxlength="100"
+          >
+
+          <div
+            class="
+              dialog-actions
             "
           >
-            <div class="dialog__header">
-              <div>
-                <span>
-                  Edit Student
-                </span>
-
-                <h2>
-                  修改學生資料
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                class="close-button"
-                @click="
-                  closeEditDialog
-                "
-              >
-                ×
-              </button>
-            </div>
-
-            <div class="form-group">
-              <label>
-                學生姓名
-              </label>
-
-              <input
-                v-model="
-                  editForm.name
-                "
-                type="text"
-                maxlength="100"
-              >
-            </div>
-
-            <div class="dialog__actions">
-              <button
-                type="button"
-                class="secondary-button"
-                @click="
-                  closeEditDialog
-                "
-              >
-                取消
-              </button>
-
-              <button
-                type="submit"
-                class="primary-button"
-                :disabled="saving"
-              >
-                {{
-                  saving
-                    ? '儲存中...'
-                    : '儲存'
-                }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </Transition>
-
-      <Transition name="dialog">
-        <div
-          v-if="
-            showEnrollmentDialog
-          "
-          class="dialog-mask"
-          @click.self="
-            closeEnrollmentDialog
-          "
-        >
-          <form
-            class="dialog"
-            @submit.prevent="
-              createEnrollment
-            "
-          >
-            <div class="dialog__header">
-              <div>
-                <span>
-                  Enrollment
-                </span>
-
-                <h2>
-                  加入課程
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                class="close-button"
-                @click="
-                  closeEnrollmentDialog
-                "
-              >
-                ×
-              </button>
-            </div>
-
-            <div class="form-group">
-              <label>
-                課程
-              </label>
-
-              <select
-                v-model="
-                  enrollmentForm.courseId
-                "
-                @change="
-                  handleCourseChange
-                "
-              >
-                <option value="">
-                  請選擇課程
-                </option>
-
-                <option
-                  v-for="
-                    course in
-                      availableCourses
-                  "
-                  :key="course.id"
-                  :value="course.id"
-                >
-                  {{ course.name }}
-                </option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>
-                預設上課時段
-              </label>
-
-              <select
-                v-model="
-                  enrollmentForm.scheduleId
-                "
-                :disabled="
-                  !enrollmentForm.courseId
-                "
-              >
-                <option value="">
-                  不指定
-                </option>
-
-                <option
-                  v-for="
-                    schedule in
-                      selectedCourseSchedules
-                  "
-                  :key="
-                    schedule.id
-                  "
-                  :value="
-                    schedule.id
-                  "
-                >
-                  {{
-                    getWeekdayLabel(
-                      schedule.weekday
-                    )
-                  }}
-
-                  {{
-                    String(
-                      schedule.start_time ||
-                      ''
-                    ).slice(
-                      0,
-                      5
-                    )
-                  }}
-                </option>
-              </select>
-            </div>
-
-            <div class="dialog__actions">
-              <button
-                type="button"
-                class="secondary-button"
-                @click="
-                  closeEnrollmentDialog
-                "
-              >
-                取消
-              </button>
-
-              <button
-                type="submit"
-                class="primary-button"
-                :disabled="
-                  enrollmentSaving ||
-                  !enrollmentForm.courseId
-                "
-              >
-                {{
-                  enrollmentSaving
-                    ? '建立中...'
-                    : '加入課程'
-                }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </Transition>
-
-      <Transition name="dialog">
-        <div
-          v-if="showLinkDialog"
-          class="dialog-mask"
-          @click.self="
-            showLinkDialog = false
-          "
-        >
-          <div class="dialog">
-            <div class="dialog__header">
-              <div>
-                <span>
-                  LINE Binding
-                </span>
-
-                <h2>
-                  學生綁定碼
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                class="close-button"
-                @click="
-                  showLinkDialog = false
-                "
-              >
-                ×
-              </button>
-            </div>
-
-            <p class="link-description">
-              請將下方綁定碼交給
-              {{ studentName }}。
-            </p>
-
-            <div class="link-code">
-              {{
-                latestLinkCode?.code
-              }}
-            </div>
-
-            <p class="link-expire">
-              有效期限：
-              {{
-                formatDateTime(
-                  latestLinkCode?.expires_at
-                )
-              }}
-            </p>
-
             <button
               type="button"
-              class="
-                primary-button
-                copy-button
-              "
               @click="
-                copyLinkCode
+                showEditDialog =
+                  false
               "
             >
-              複製綁定碼
+              取消
+            </button>
+
+            <button
+              type="submit"
+              class="
+                confirm
+              "
+              :disabled="
+                saving
+              "
+            >
+              {{
+                saving
+                  ? '儲存中...'
+                  : '儲存'
+              }}
             </button>
           </div>
-        </div>
-      </Transition>
+        </form>
+      </div>
+
+      <!-- ====================================================
+           Enrollment Dialog
+           ==================================================== -->
+
+      <div
+        v-if="
+          showEnrollmentDialog
+        "
+        class="
+          dialog-mask
+        "
+        @click.self="
+          showEnrollmentDialog =
+            false
+        "
+      >
+        <form
+          class="
+            dialog
+          "
+          @submit.prevent="
+            createEnrollment
+          "
+        >
+          <h2>
+            加入課程
+          </h2>
+
+          <label>
+            課程
+          </label>
+
+          <select
+            v-model="
+              enrollmentForm
+                .courseId
+            "
+            @change="
+              enrollmentForm
+                .scheduleId =
+                  ''
+            "
+          >
+            <option
+              value=""
+            >
+              請選擇
+            </option>
+
+            <option
+              v-for="
+                course in
+                  availableCourses
+              "
+              :key="
+                course.id
+              "
+              :value="
+                course.id
+              "
+            >
+              {{
+                course.name
+              }}
+            </option>
+          </select>
+
+          <label>
+            主要班別
+          </label>
+
+          <select
+            v-model="
+              enrollmentForm
+                .scheduleId
+            "
+            :disabled="
+              !enrollmentForm
+                .courseId
+            "
+          >
+            <option
+              value=""
+            >
+              暫不指定
+            </option>
+
+            <option
+              v-for="
+                schedule in
+                  selectedCourseSchedules
+              "
+              :key="
+                schedule.id
+              "
+              :value="
+                schedule.id
+              "
+            >
+              {{
+                getWeekdayLabel(
+                  schedule.weekday
+                )
+              }}
+
+              {{
+                String(
+                  schedule.start_time ||
+                  ''
+                )
+                  .slice(
+                    0,
+                    5
+                  )
+              }}
+            </option>
+          </select>
+
+          <small
+            class="
+              form-hint
+            "
+          >
+            建立後可以再選擇第二、第三個固定時段。
+          </small>
+
+          <div
+            class="
+              dialog-actions
+            "
+          >
+            <button
+              type="button"
+              @click="
+                showEnrollmentDialog =
+                  false
+              "
+            >
+              取消
+            </button>
+
+            <button
+              type="submit"
+              class="
+                confirm
+              "
+              :disabled="
+                enrollmentSaving ||
+                !enrollmentForm
+                  .courseId
+              "
+            >
+              {{
+                enrollmentSaving
+                  ? '建立中...'
+                  : '加入課程'
+              }}
+            </button>
+          </div>
+        </form>
+      </div>
     </Teleport>
 
-    <Transition name="toast">
+    <Transition
+      name="
+        toast
+      "
+    >
       <div
         v-if="
           successMessage
         "
-        class="toast"
+        class="
+          toast
+        "
       >
-        {{ successMessage }}
+        {{
+          successMessage
+        }}
       </div>
     </Transition>
   </main>
@@ -1373,261 +1149,244 @@ onBeforeUnmount(
 <style scoped>
 .student-detail-page {
   min-height: 100vh;
-  padding: 28px 20px 60px;
+  padding:
+    27px
+    18px
+    60px;
   background: #f6f6f6;
   color: #222222;
 }
 
-.detail-container {
+.container {
   width: 100%;
-  max-width: 1100px;
+  max-width: 1080px;
   margin: 0 auto;
 }
 
-.page-header {
+.header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
+  gap: 20px;
 }
 
 .back-link {
   display: block;
   margin-bottom: 16px;
   color: #777777;
-  font-size: 12px;
+  font-size: 11px;
   text-decoration: none;
 }
 
 .eyebrow,
-.panel__header span {
+.panel-header span,
+.enrollment-heading span,
+.package-summary span,
+.subsection-title {
   color: #999999;
-  font-size: 11px;
-  letter-spacing: 1px;
+  font-size: 10px;
+  letter-spacing: 0.8px;
 }
 
-.page-header h1 {
+.header h1 {
   margin: 4px 0 0;
-  font-size: 28px;
-}
-
-.page-header p {
-  color: #888888;
-  font-size: 13px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns:
-    repeat(
-      4,
-      minmax(0, 1fr)
-    );
-  gap: 14px;
-  margin-top: 24px;
-}
-
-.summary-card {
-  display: flex;
-  flex-direction: column;
-  min-height: 120px;
-  padding: 18px;
-  background: #ffffff;
-  border-radius: 20px;
-}
-
-.summary-card span {
-  color: #888888;
-  font-size: 11px;
-}
-
-.summary-card strong {
-  margin-top: 12px;
   font-size: 27px;
 }
 
-.summary-card small {
-  margin-top: auto;
-  color: #aaaaaa;
-}
-
-.status-text {
-  font-size: 18px !important;
-}
-
-.status-text--linked {
-  color: #4b9450;
-}
-
-.content-grid {
-  display: grid;
-  grid-template-columns:
-    repeat(
-      2,
-      1fr
-    );
-  gap: 18px;
-  margin-top: 18px;
-}
-
-.panel {
-  padding: 22px;
-  background: #ffffff;
-  border-radius: 24px;
-}
-
-.section-panel {
-  margin-top: 18px;
-}
-
-.panel__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.panel__header h2 {
-  margin: 4px 0 0;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  min-height: 52px;
-  align-items: center;
-  border-bottom: 1px solid #eeeeee;
-}
-
-.info-row span {
+.header p {
+  margin: 6px 0 0;
   color: #888888;
   font-size: 12px;
 }
 
-.line-status {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  background: #f7f7f7;
-  border-radius: 17px;
-}
-
-.line-status__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  background: #eeeeee;
-  border-radius: 12px;
-}
-
-.line-status > div:nth-child(2) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.line-status span {
-  margin-top: 4px;
-  color: #888888;
-  font-size: 11px;
-}
-
-.enrollment-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 68px;
-  border-bottom: 1px solid #eeeeee;
-}
-
-.enrollment-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  background: #f1f1f1;
+.black-button {
+  min-height: 42px;
+  padding:
+    0
+    15px;
+  border: 0;
+  background: #222222;
   border-radius: 13px;
-}
-
-.enrollment-main {
-  display: flex;
-  flex-direction: column;
-}
-
-.enrollment-main span {
-  margin-top: 4px;
-  color: #999999;
+  color: #ffffff;
   font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.package-list {
+.black-button.small {
+  min-height: 36px;
+}
+
+/* ============================================================
+   Overview
+   ============================================================ */
+
+.overview-grid {
   display: grid;
   grid-template-columns:
     repeat(
       3,
-      1fr
+      minmax(0, 1fr)
     );
+  gap: 13px;
+  margin-top: 22px;
+}
+
+.overview-grid article {
+  display: flex;
+  flex-direction: column;
+  min-height: 104px;
+  padding: 17px;
+  background: #ffffff;
+  border-radius: 19px;
+}
+
+.overview-grid span {
+  color: #999999;
+  font-size: 10px;
+}
+
+.overview-grid strong {
+  margin-top: auto;
+  font-size: 26px;
+}
+
+.small-status {
+  font-size: 17px !important;
+}
+
+/* ============================================================
+   Main Panel
+   ============================================================ */
+
+.main-panel {
+  margin-top: 17px;
+  padding: 21px;
+  background: #ffffff;
+  border-radius: 23px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.package-card {
-  display: flex;
-  justify-content: space-between;
-  padding: 16px;
-  background: #f7f7f7;
-  border-radius: 17px;
+.panel-header h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
 }
 
-.package-card > div {
+/* ============================================================
+   Enrollment
+   ============================================================ */
+
+.enrollment-list {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+  margin-top: 17px;
 }
 
-.package-card__right {
-  align-items: flex-end;
+.enrollment-card {
+  padding: 17px;
+  border: 1px solid #eeeeee;
+  border-radius: 18px;
 }
 
-.empty-state {
-  padding: 28px;
-  color: #aaaaaa;
-  text-align: center;
+.enrollment-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
 
-.primary-button,
-.secondary-button {
-  min-height: 44px;
-  border: 0;
-  border-radius: 13px;
-  cursor: pointer;
+.enrollment-heading h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
 }
 
-.primary-button {
-  width: 100%;
-  margin-top: 18px;
+.status-pill {
+  padding:
+    5px
+    8px;
+  background: #f3f3f3;
+  border-radius: 999px;
+  font-size: 9px !important;
+}
+
+.current-schedules {
+  margin-top: 14px;
+}
+
+.schedule-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.schedule-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding:
+    6px
+    9px;
+  background: #f4f4f4;
+  border-radius: 999px;
+  color: #666666;
+  font-size: 10px;
+}
+
+.schedule-chip--primary {
   background: #222222;
   color: #ffffff;
 }
 
-.header-button,
-.small-button,
-.link-code-button {
-  width: auto;
-  padding:
-    0
-    15px;
-  margin: 0;
+.schedule-chip small {
+  opacity: 0.65;
 }
 
-.secondary-button {
-  background: #eeeeee;
+.no-schedule {
+  display: block;
+  margin-top: 7px;
+  color: #aaaaaa;
+  font-size: 10px;
 }
 
-.text-button {
-  border: 0;
-  background: none;
+/* ============================================================
+   Package
+   ============================================================ */
+
+.package-summary {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      3,
+      minmax(0, 1fr)
+    );
+  gap: 9px;
+  margin-top: 15px;
+  padding: 13px;
+  background: #f7f7f7;
+  border-radius: 13px;
 }
+
+.package-summary >
+div {
+  display: flex;
+  flex-direction: column;
+}
+
+.package-summary strong {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+/* ============================================================
+   Dialog
+   ============================================================ */
 
 .dialog-mask {
   position: fixed;
@@ -1636,98 +1395,101 @@ onBeforeUnmount(
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 18px;
   background:
     rgb(0 0 0 / 45%);
 }
 
 .dialog {
-  width: calc(
-    100% - 40px
-  );
-  max-width: 430px;
-  padding: 24px;
-  background: #ffffff;
-  border-radius: 24px;
-}
-
-.dialog__header {
-  display: flex;
-  justify-content: space-between;
-}
-
-.close-button {
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 50%;
-}
-
-.form-group {
   display: flex;
   flex-direction: column;
-  margin-top: 20px;
+  width: 100%;
+  max-width: 410px;
+  padding: 23px;
+  background: #ffffff;
+  border-radius: 22px;
 }
 
-.form-group input,
-.form-group select {
-  height: 46px;
-  margin-top: 7px;
+.dialog h2 {
+  margin: 0 0 18px;
+}
+
+.dialog label {
+  margin:
+    13px
+    0
+    6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dialog input,
+.dialog select {
+  height: 44px;
   padding:
     0
-    12px;
+    11px;
+  border: 1px solid #dddddd;
+  border-radius: 12px;
 }
 
-.dialog__actions {
+.form-hint {
+  margin-top: 7px;
+  color: #999999;
+  font-size: 10px;
+}
+
+.dialog-actions {
   display: grid;
   grid-template-columns:
     1fr 1fr;
-  gap: 10px;
-  margin-top: 24px;
+  gap: 9px;
+  margin-top: 22px;
 }
 
-.dialog__actions
-.primary-button {
-  margin: 0;
+.dialog-actions button {
+  min-height: 43px;
+  border: 0;
+  background: #eeeeee;
+  border-radius: 12px;
 }
 
-.link-description {
-  color: #777777;
-  line-height: 1.7;
-}
-
-.link-code {
-  padding: 20px;
-  background: #f3f3f3;
-  border-radius: 17px;
-  font-size: 27px;
-  font-weight: 700;
-  letter-spacing: 5px;
-  text-align: center;
-}
-
-.link-expire {
-  color: #999999;
-  font-size: 11px;
-  text-align: center;
-}
-
-.toast {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  padding:
-    11px
-    20px;
+.dialog-actions .confirm {
   background: #222222;
-  border-radius: 999px;
-  color: white;
-  transform:
-    translateX(-50%);
+  color: #ffffff;
+}
+
+/* ============================================================
+   Utility
+   ============================================================ */
+
+.error-message {
+  margin-top: 13px;
+  padding: 11px;
+  background: #fff0f0;
+  border-radius: 11px;
+  color: #c94343;
+  font-size: 11px;
+}
+
+.empty-state {
+  padding: 30px;
+  color: #aaaaaa;
+  text-align: center;
+}
+
+.loading-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
 }
 
 .loader {
-  width: 40px;
-  height: 40px;
+  width: 39px;
+  height: 39px;
+  margin-bottom: 13px;
   border: 4px solid #eeeeee;
   border-top-color: #222222;
   border-radius: 50%;
@@ -1737,11 +1499,20 @@ onBeforeUnmount(
     linear infinite;
 }
 
-.loading-state {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 50vh;
+.toast {
+  position: fixed;
+  bottom: 27px;
+  left: 50%;
+  z-index: 1100;
+  padding:
+    10px
+    18px;
+  background: #222222;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 11px;
+  transform:
+    translateX(-50%);
 }
 
 @keyframes loading {
@@ -1752,24 +1523,24 @@ onBeforeUnmount(
 }
 
 @media (
-  max-width: 800px
+  max-width: 650px
 ) {
-  .summary-grid {
+  .overview-grid {
     grid-template-columns:
       repeat(
-        2,
+        3,
         1fr
       );
   }
 
-  .content-grid {
+  .package-summary {
     grid-template-columns:
       1fr;
   }
 
-  .package-list {
-    grid-template-columns:
-      1fr;
+  .header >
+  .black-button {
+    display: none;
   }
 }
 </style>

@@ -1,5 +1,23 @@
+import {
+  getStudentEnrollments,
+} from '../../../../services/enrollmentService.js'
+
+import {
+  getStudentPackages,
+} from '../../../../services/packageService.js'
+
+import {
+  requireAuth,
+} from '../../../../utils/authSession.js'
+
+import {
+  useDatabase,
+} from '../../../../utils/db.js'
+
 export default defineEventHandler(
-  async (event) => {
+  async (
+    event
+  ) => {
     // ========================================================
     // Teacher Auth
     // ========================================================
@@ -26,19 +44,15 @@ export default defineEventHandler(
     // ========================================================
 
     const studentId =
-      Number(
+      String(
         getRouterParam(
           event,
           'id'
-        )
+        ) || ''
       )
+        .trim()
 
-    if (
-      !studentId ||
-      Number.isNaN(
-        studentId
-      )
-    ) {
+    if (!studentId) {
       throw createError({
         statusCode: 400,
 
@@ -83,79 +97,28 @@ export default defineEventHandler(
       students[0]
 
     // ========================================================
-    // Enrollments
+    // Enrollment + 多 Schedule
     // ========================================================
 
     const enrollments =
-      await sql`
-        SELECT
-          e.*,
-
-          c.name
-            AS course_name,
-
-          cs.weekday
-            AS schedule_weekday,
-
-          cs.start_time
-            AS schedule_start_time
-
-        FROM
-          student_enrollments e
-
-        LEFT JOIN
-          dance_courses c
-
-          ON c.id =
-            e.course_id
-
-        LEFT JOIN
-          class_schedules cs
-
-          ON cs.id =
-            e.default_schedule_id
-
-        WHERE
-          e.student_id =
-            ${studentId}
-
-        ORDER BY
-          e.id DESC
-      `
+      await getStudentEnrollments(
+        studentId
+      )
 
     // ========================================================
     // Packages
     // ========================================================
 
     const packages =
-      await sql`
-        SELECT
-          p.*,
-
-          c.name
-            AS course_name
-
-        FROM
-          student_packages p
-
-        LEFT JOIN
-          dance_courses c
-
-          ON c.id =
-            p.course_id
-
-        WHERE
-          p.student_id =
-            ${studentId}
-
-        ORDER BY
-          p.id DESC
-
-        LIMIT 50
-      `
+      await getStudentPackages(
+        studentId
+      )
 
     // ========================================================
     // Attendance
+    //
+    // Attendance 正式 Service 尚未開始，
+    // 這裡暫時只做最近紀錄。
     // ========================================================
 
     const attendanceRecords =
@@ -163,7 +126,16 @@ export default defineEventHandler(
         SELECT
           a.*,
 
-          cs.class_date
+          cs.class_date,
+
+          cs.start_time,
+
+          cs.end_time,
+
+          p.course_id,
+
+          c.name
+            AS course_name
 
         FROM
           attendance_records_v2 a
@@ -174,18 +146,33 @@ export default defineEventHandler(
           ON cs.id =
             a.session_id
 
+        LEFT JOIN
+          student_packages p
+
+          ON p.id =
+            a.package_id
+
+        LEFT JOIN
+          dance_courses c
+
+          ON c.id =
+            p.course_id
+
         WHERE
           a.student_id =
             ${studentId}
 
         ORDER BY
-          a.id DESC
+          cs.class_date DESC
+            NULLS LAST,
+
+          a.created_at DESC
 
         LIMIT 20
       `
 
     // ========================================================
-    // Courses
+    // Available Courses
     // ========================================================
 
     const availableCourses =
@@ -196,12 +183,16 @@ export default defineEventHandler(
         FROM
           dance_courses
 
+        WHERE
+          status =
+            'ACTIVE'
+
         ORDER BY
           name ASC
       `
 
     // ========================================================
-    // Schedules
+    // Available Schedules
     // ========================================================
 
     const availableSchedules =
@@ -212,13 +203,18 @@ export default defineEventHandler(
         FROM
           class_schedules
 
+        WHERE
+          status =
+            'ACTIVE'
+
         ORDER BY
+          course_id,
           weekday ASC,
           start_time ASC
       `
 
     // ========================================================
-    // Audit Logs
+    // Audit
     // ========================================================
 
     let auditLogs = []
@@ -243,15 +239,13 @@ export default defineEventHandler(
         `
     } catch (error) {
       console.warn(
-        'audit_logs 查詢失敗：',
+        'audit_logs 尚未建立或查詢失敗：',
         error?.message
       )
-
-      auditLogs = []
     }
 
     // ========================================================
-    // Latest Link Code
+    // Link Code
     // ========================================================
 
     let latestLinkCode =
@@ -264,12 +258,7 @@ export default defineEventHandler(
         const linkCodes =
           await sql`
             SELECT
-              id,
-              code,
-              expires_at,
-              used_at,
-              revoked_at,
-              created_at
+              *
 
             FROM
               student_link_codes
@@ -299,7 +288,7 @@ export default defineEventHandler(
           null
       } catch (error) {
         console.warn(
-          'student_link_codes 查詢失敗：',
+          'student_link_codes 尚未建立或查詢失敗：',
           error?.message
         )
       }
