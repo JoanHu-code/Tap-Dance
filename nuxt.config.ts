@@ -6,4 +6,9 @@ export default defineNuxtConfig({
   imports: {
     dirs: ["stores"],
   },
+    runtimeConfig: {
+    public: {
+      liffId: process.env.NUXT_PUBLIC_LIFF_ID,
+    },
+  },
 })

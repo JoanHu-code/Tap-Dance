@@ -1,7 +1,4 @@
 <script setup>
-const attendanceStore =
-  useAttendanceStore()
-
 const {
   course,
   attendedCount,
@@ -9,25 +6,22 @@ const {
   progressPercentage,
   sortedAttendanceRecords,
 
+  loading,
+  submitting,
+  error,
+
   addTodayAttendance,
   addTodayLeave,
   cancelRecord,
+  refreshAttendance,
 } = useAttendance()
+
+// ============================================================
+// Toast
+// ============================================================
 
 const message = ref('')
 const showMessage = ref(false)
-
-const showConfirmDialog = ref(false)
-
-const pendingRecordId = ref(null)
-
-const confirmConfig = ref({
-  type: '',
-  title: '',
-  message: '',
-  confirmText: '確認',
-  danger: false,
-})
 
 let toastTimer = null
 
@@ -36,13 +30,38 @@ const showToast = (text) => {
   showMessage.value = true
 
   if (toastTimer) {
-    window.clearTimeout(toastTimer)
+    window.clearTimeout(
+      toastTimer
+    )
   }
 
-  toastTimer = window.setTimeout(() => {
-    showMessage.value = false
-  }, 2000)
+  toastTimer =
+    window.setTimeout(
+      () => {
+        showMessage.value = false
+      },
+      2500
+    )
 }
+
+// ============================================================
+// 確認視窗
+// ============================================================
+
+const showConfirmDialog =
+  ref(false)
+
+const pendingRecordId =
+  ref(null)
+
+const confirmConfig =
+  ref({
+    type: '',
+    title: '',
+    message: '',
+    confirmText: '確認',
+    danger: false,
+  })
 
 const openConfirmDialog = ({
   type,
@@ -59,222 +78,190 @@ const openConfirmDialog = ({
     danger,
   }
 
-  showConfirmDialog.value = true
+  showConfirmDialog.value =
+    true
 }
 
-/**
- * 取得某一天中午 12:00 的時間
- *
- * 例如：
- * 2026-08-22
- *
- * 會轉成：
- * 2026-08-22 12:00:00
- */
-const getCancelDeadline = (dateString) => {
-  if (!dateString) {
-    return null
-  }
-
-  const deadline =
-    new Date(`${dateString}T12:00:00`)
-
-  if (
-    Number.isNaN(
-      deadline.getTime()
-    )
-  ) {
-    return null
-  }
-
-  return deadline
-}
-
-/**
- * 判斷紀錄目前是否還能取消
- *
- * 規則：
- * 紀錄日期當天中午 12:00 前可以取消。
- * 12:00 起即不可取消。
- */
-const canCancelRecord = (record) => {
-  if (!record) {
-    return false
-  }
-
-  if (
-    record.status === 'CANCELLED'
-  ) {
-    return false
-  }
-
-  const deadline =
-    getCancelDeadline(record.date)
-
-  if (!deadline) {
-    return false
-  }
-
-  const now = new Date()
-
-  return now < deadline
-}
+// ============================================================
+// 上課
+// ============================================================
 
 const handleAttendance = () => {
   openConfirmDialog({
-    type: 'ATTENDANCE',
-    title: '確認上課',
+    type:
+      'ATTENDANCE',
+
+    title:
+      '確認上課',
+
     message:
       '確定要新增今天的上課紀錄嗎？新增後會計入本期堂數。',
-    confirmText: '確認上課',
+
+    confirmText:
+      '確認上課',
   })
 }
+
+// ============================================================
+// 請假
+// ============================================================
 
 const handleLeave = () => {
   openConfirmDialog({
-    type: 'LEAVE',
-    title: '確認請假',
+    type:
+      'LEAVE',
+
+    title:
+      '確認請假',
+
     message:
       '確定要新增今天的請假紀錄嗎？本次不會計入已上課堂數。',
-    confirmText: '確認請假',
+
+    confirmText:
+      '確認請假',
   })
 }
 
-/**
- * 點擊紀錄旁邊的「取消」
- */
-const handleCancelRecord = (id) => {
-  const record =
-    sortedAttendanceRecords.value.find(
-      (item) => item.id === id
-    )
+// ============================================================
+// 取消紀錄
+// ============================================================
 
-  if (!record) {
-    showToast(
-      '找不到這筆紀錄'
-    )
-
-    return
-  }
-
-  if (
-    record.status === 'CANCELLED'
-  ) {
-    showToast(
-      '這筆紀錄已經取消'
-    )
-
-    return
-  }
-
-  if (!canCancelRecord(record)) {
-    showToast(
-      '已超過取消期限，當天中午 12:00 後無法取消紀錄'
-    )
-
-    return
-  }
-
-  pendingRecordId.value = id
+const handleCancelRecord = (
+  id
+) => {
+  pendingRecordId.value =
+    id
 
   openConfirmDialog({
-    type: 'CANCEL_RECORD',
-    title: '取消紀錄',
+    type:
+      'CANCEL_RECORD',
+
+    title:
+      '取消紀錄',
+
     message:
-      '確定要取消這筆紀錄嗎？取消後不會計入堂數，但紀錄仍會保留。',
-    confirmText: '確認取消',
-    danger: true,
+      '確定要取消這筆紀錄嗎？取消後不會計入堂數，但紀錄仍會保留。當天中午 12:00 後無法取消。',
+
+    confirmText:
+      '確認取消',
+
+    danger:
+      true,
   })
 }
 
-/**
- * 確認視窗按下「確認」
- */
-const handleConfirmAction = () => {
-  let result = null
+// ============================================================
+// 確認執行
+// ============================================================
 
-  switch (
-    confirmConfig.value.type
-  ) {
-    case 'ATTENDANCE':
-      result =
-        addTodayAttendance()
+const handleConfirmAction =
+  async () => {
+    if (
+      submitting.value
+    ) {
+      return
+    }
 
-      break
+    let result = null
 
-    case 'LEAVE':
-      result =
-        addTodayLeave()
+    switch (
+      confirmConfig.value.type
+    ) {
+      case 'ATTENDANCE':
+        result =
+          await addTodayAttendance()
 
-      break
+        break
 
-    case 'CANCEL_RECORD': {
-      const record =
-        sortedAttendanceRecords.value.find(
-          (item) =>
-            item.id ===
-            pendingRecordId.value
-        )
+      case 'LEAVE':
+        result =
+          await addTodayLeave()
 
-      /**
-       * 使用者可能在 11:59 打開確認視窗，
-       * 但 12:00 之後才按「確認取消」。
-       *
-       * 所以真正執行取消前，
-       * 再檢查一次期限。
-       */
-      if (
-        !record ||
-        !canCancelRecord(record)
-      ) {
-        result = {
-          success: false,
-          message:
-            '已超過取消期限，當天中午 12:00 後無法取消紀錄',
+        break
+
+      case 'CANCEL_RECORD':
+        if (
+          pendingRecordId.value ===
+          null
+        ) {
+          result = {
+            success: false,
+            message:
+              '找不到要取消的紀錄',
+          }
+
+          break
         }
+
+        result =
+          await cancelRecord(
+            pendingRecordId.value
+          )
 
         pendingRecordId.value =
           null
 
         break
-      }
+    }
 
-      result =
-        cancelRecord(
-          pendingRecordId.value
-        )
+    showConfirmDialog.value =
+      false
 
-      pendingRecordId.value =
-        null
-
-      break
+    if (result) {
+      showToast(
+        result.message
+      )
     }
   }
 
-  showConfirmDialog.value = false
+// ============================================================
+// 關閉確認視窗
+// ============================================================
 
-  if (result) {
-    showToast(
-      result.message
-    )
+const handleCancelConfirm =
+  () => {
+    if (
+      submitting.value
+    ) {
+      return
+    }
+
+    showConfirmDialog.value =
+      false
+
+    pendingRecordId.value =
+      null
   }
-}
 
-/**
- * 關閉確認視窗
- */
-const handleCancelConfirm = () => {
-  showConfirmDialog.value = false
-  pendingRecordId.value = null
-}
+// ============================================================
+// 初始化
+// ============================================================
 
-onBeforeUnmount(() => {
-  if (toastTimer) {
-    window.clearTimeout(
-      toastTimer
-    )
+onMounted(
+  async () => {
+    await refreshAttendance()
+
+    if (error.value) {
+      showToast(
+        error.value
+      )
+    }
   }
-})
+)
+
+// ============================================================
+// 清除 Timer
+// ============================================================
+
+onBeforeUnmount(
+  () => {
+    if (toastTimer) {
+      window.clearTimeout(
+        toastTimer
+      )
+    }
+  }
+)
 </script>
 
 <template>
@@ -296,45 +283,68 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <CourseProgress
-        :course-name="
-          course.name
-        "
-        :attended-count="
-          attendedCount
-        "
-        :total-sessions="
-          course.totalSessions
-        "
-        :remaining-sessions="
-          remainingSessions
-        "
-        :progress-percentage="
-          progressPercentage
-        "
-        :price="
-          course.price
-        "
-      />
+      <!-- 載入中 -->
+      <div
+        v-if="loading"
+        class="loading-card"
+      >
+        <div
+          class="loading-spinner"
+        />
 
-      <CourseQuickActions
-        @attendance="
-          handleAttendance
-        "
-        @leave="
-          handleLeave
-        "
-      />
+        <span>
+          資料載入中...
+        </span>
+      </div>
 
-      <AttendanceList
-        :records="
-          sortedAttendanceRecords
-        "
-        @cancel="
-          handleCancelRecord
-        "
-      />
+      <template v-else>
+        <!-- 課程進度 -->
+        <CourseProgress
+          :course-name="
+            course.name
+          "
+          :attended-count="
+            attendedCount
+          "
+          :total-sessions="
+            course.totalSessions
+          "
+          :remaining-sessions="
+            remainingSessions
+          "
+          :progress-percentage="
+            progressPercentage
+          "
+          :price="
+            course.price
+          "
+        />
+
+        <!-- 快速操作 -->
+        <CourseQuickActions
+          @attendance="
+            handleAttendance
+          "
+          @leave="
+            handleLeave
+          "
+        />
+
+        <!-- 上課 / 已取消 Tab -->
+        <AttendanceList
+          :records="
+            sortedAttendanceRecords
+          "
+          @cancel="
+            handleCancelRecord
+          "
+        />
+      </template>
     </div>
+
+    <!-- ======================================================
+         確認視窗
+         ====================================================== -->
 
     <Teleport to="body">
       <Transition name="dialog">
@@ -387,6 +397,9 @@ onBeforeUnmount(() => {
                   dialog__button
                   dialog__button--cancel
                 "
+                :disabled="
+                  submitting
+                "
                 @click="
                   handleCancelConfirm
                 "
@@ -406,12 +419,17 @@ onBeforeUnmount(() => {
                   'dialog__button--danger':
                     confirmConfig.danger,
                 }"
+                :disabled="
+                  submitting
+                "
                 @click="
                   handleConfirmAction
                 "
               >
                 {{
-                  confirmConfig.confirmText
+                  submitting
+                    ? '處理中...'
+                    : confirmConfig.confirmText
                 }}
               </button>
             </div>
@@ -419,6 +437,10 @@ onBeforeUnmount(() => {
         </div>
       </Transition>
     </Teleport>
+
+    <!-- ======================================================
+         Toast
+         ====================================================== -->
 
     <Transition name="toast">
       <div
@@ -434,7 +456,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .home {
   min-height: 100vh;
-  padding: 24px 16px 50px;
+  padding:
+    24px
+    16px
+    50px;
   background: #f7f7f7;
 }
 
@@ -446,6 +471,10 @@ onBeforeUnmount(() => {
   max-width: 560px;
   margin: 0 auto;
 }
+
+/* ============================================================
+   Header
+   ============================================================ */
 
 .home__header {
   display: flex;
@@ -462,6 +491,7 @@ onBeforeUnmount(() => {
 
 .home__header h1 {
   margin: 3px 0 0;
+  color: #222222;
   font-size: 25px;
 }
 
@@ -477,6 +507,53 @@ onBeforeUnmount(() => {
     0 5px 16px
     rgb(0 0 0 / 5%);
 }
+
+/* ============================================================
+   Loading
+   ============================================================ */
+
+.loading-card {
+  display: flex;
+  min-height: 160px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px;
+  background: #ffffff;
+  border-radius: 24px;
+  color: #999999;
+  font-size: 14px;
+  box-shadow:
+    0 8px 30px
+    rgb(0 0 0 / 5%);
+}
+
+.loading-spinner {
+  width: 30px;
+  height: 30px;
+  border:
+    3px solid
+    #eeeeee;
+  border-top-color:
+    #333333;
+  border-radius: 50%;
+  animation:
+    spin 0.8s
+    linear
+    infinite;
+}
+
+@keyframes spin {
+  to {
+    transform:
+      rotate(360deg);
+  }
+}
+
+/* ============================================================
+   Dialog
+   ============================================================ */
 
 .dialog-mask {
   position: fixed;
@@ -514,7 +591,8 @@ onBeforeUnmount(() => {
   width: 54px;
   height: 54px;
   margin:
-    0 auto 16px;
+    0 auto
+    16px;
   background: #f4f4f4;
   border-radius: 50%;
   color: #444444;
@@ -534,7 +612,10 @@ onBeforeUnmount(() => {
 }
 
 .dialog__message {
-  margin: 12px 0 0;
+  margin:
+    12px
+    0
+    0;
   color: #666666;
   font-size: 14px;
   line-height: 1.7;
@@ -551,7 +632,8 @@ onBeforeUnmount(() => {
 .dialog__button {
   min-height: 46px;
   padding:
-    10px 16px;
+    10px
+    16px;
   border: 0;
   border-radius: 14px;
   font-size: 14px;
@@ -564,9 +646,17 @@ onBeforeUnmount(() => {
     0.15s ease;
 }
 
-.dialog__button:active {
+.dialog__button:not(
+  :disabled
+):active {
   transform:
     scale(0.97);
+}
+
+.dialog__button:disabled {
+  cursor:
+    not-allowed;
+  opacity: 0.55;
 }
 
 .dialog__button--cancel {
@@ -584,17 +674,27 @@ onBeforeUnmount(() => {
   color: #ffffff;
 }
 
+/* ============================================================
+   Toast
+   ============================================================ */
+
 .toast {
   position: fixed;
   bottom: 28px;
   left: 50%;
   z-index: 1100;
   max-width:
-    calc(100vw - 32px);
+    calc(
+      100vw - 32px
+    );
   padding:
-    11px 20px;
+    11px
+    20px;
   background:
-    rgb(20 20 20 / 92%);
+    rgb(
+      20 20 20 /
+      92%
+    );
   border-radius: 999px;
   color: #ffffff;
   font-size: 14px;
@@ -604,10 +704,15 @@ onBeforeUnmount(() => {
     translateX(-50%);
 }
 
+/* ============================================================
+   Animation
+   ============================================================ */
+
 .dialog-enter-active,
 .dialog-leave-active {
   transition:
-    opacity 0.2s ease;
+    opacity
+    0.2s ease;
 }
 
 .dialog-enter-active
@@ -653,6 +758,10 @@ onBeforeUnmount(() => {
       10px
     );
 }
+
+/* ============================================================
+   Mobile
+   ============================================================ */
 
 @media (
   max-width: 480px
