@@ -11,7 +11,7 @@ import {
 } from '../utils/taipeiTime.js'
 
 // ============================================================
-// 基本工具
+// UUID
 // ============================================================
 
 const UUID_PATTERN =
@@ -42,6 +42,10 @@ const assertUuid = (
     })
   }
 }
+
+// ============================================================
+// 數字處理
+// ============================================================
 
 const normalizePositiveInteger = (
   value,
@@ -90,10 +94,13 @@ const normalizePrice = (
   return number
 }
 
+// ============================================================
+// 日期
+// ============================================================
+
 const normalizeDate = (
   value,
-  fallback =
-    null
+  fallback = null
 ) => {
   const target =
     String(
@@ -138,12 +145,7 @@ const normalizeDate = (
 }
 
 // ============================================================
-// audit_logs 是否已經存在
-//
-// 目前 Migration 013 還沒正式做到，
-// 因此 Package 功能先相容兩種狀態。
-//
-// 等 013 做完後，可以把 Audit 改成強制成功。
+// Audit Table 是否存在
 // ============================================================
 
 const hasAuditLogsTable =
@@ -165,7 +167,7 @@ const hasAuditLogsTable =
   }
 
 // ============================================================
-// 執行 Neon Transaction
+// Neon Transaction
 // ============================================================
 
 const runTransaction =
@@ -174,31 +176,24 @@ const runTransaction =
     queries
   ) => {
     if (
-      typeof sql.transaction ===
+      typeof sql.transaction !==
       'function'
     ) {
-      return await sql
-        .transaction(
-          queries
-        )
+      throw createError({
+        statusCode: 500,
+
+        statusMessage:
+          '目前資料庫連線不支援 Transaction',
+      })
     }
 
-    const results = []
-
-    for (
-      const query of
+    return await sql.transaction(
       queries
-    ) {
-      results.push(
-        await query
-      )
-    }
-
-    return results
+    )
   }
 
 // ============================================================
-// 驗證 Student
+// Student
 // ============================================================
 
 const requireStudentRecord =
@@ -240,7 +235,7 @@ const requireStudentRecord =
   }
 
 // ============================================================
-// 驗證 Course
+// Course
 // ============================================================
 
 const requireCourse =
@@ -282,7 +277,7 @@ const requireCourse =
   }
 
 // ============================================================
-// 驗證 Enrollment
+// Enrollment
 // ============================================================
 
 const requireEnrollment =
@@ -296,8 +291,7 @@ const requireEnrollment =
         SELECT
           *
 
-        FROM
-          student_enrollments
+        FROM student_enrollments
 
         WHERE
           student_id =
@@ -329,7 +323,7 @@ const requireEnrollment =
   }
 
 // ============================================================
-// 驗證 Bank Account
+// Bank Account
 // ============================================================
 
 const validateBankAccount =
@@ -377,7 +371,134 @@ const validateBankAccount =
   }
 
 // ============================================================
-// 取得單一 Package
+// Package 顯示資料
+// ============================================================
+
+const enrichPackage = (
+  item
+) => {
+  const totalSessions =
+    Number(
+      item.total_sessions ||
+      0
+    )
+
+  const attendedCount =
+    Number(
+      item.attended_count ||
+      0
+    )
+
+  const remainingSessions =
+    Math.max(
+      totalSessions -
+        attendedCount,
+      0
+    )
+
+  return {
+    ...item,
+
+    attended_count:
+      attendedCount,
+
+    remaining_sessions:
+      remainingSessions,
+
+    progress_percentage:
+      totalSessions > 0
+        ? Math.min(
+            Math.round(
+              (
+                attendedCount /
+                totalSessions
+              ) *
+                100
+            ),
+            100
+          )
+        : 0,
+
+    is_sessions_completed:
+      totalSessions > 0 &&
+      attendedCount >=
+        totalSessions,
+
+    can_renew:
+      totalSessions > 0 &&
+      attendedCount >=
+        totalSessions &&
+      item.status !==
+        'CANCELLED',
+  }
+}
+
+// ============================================================
+// 同步滿堂 Package
+//
+// 例如：
+// 8 / 8
+// ACTIVE → COMPLETED
+// ============================================================
+
+export const refreshCompletedPackagesForStudent =
+  async (
+    studentId
+  ) => {
+    assertUuid(
+      studentId,
+      '學生 ID'
+    )
+
+    const sql =
+      useDatabase()
+
+    await sql`
+      UPDATE
+        student_packages p
+
+      SET
+        status =
+          'COMPLETED',
+
+        completion_reason =
+          COALESCE(
+            completion_reason,
+            'SESSIONS_USED_UP'
+          ),
+
+        updated_at =
+          NOW()
+
+      WHERE
+        p.student_id =
+          ${studentId}
+
+        AND
+          p.status =
+            'ACTIVE'
+
+        AND (
+          SELECT
+            COUNT(*)
+
+          FROM
+            attendance_records_v2 a
+
+          WHERE
+            a.package_id =
+              p.id
+
+            AND
+              a.status =
+                'ATTENDED'
+        ) >=
+          p.total_sessions
+    `
+  }
+
+// ============================================================
+// 單一 Package
 // ============================================================
 
 export const getPackageById =
@@ -455,129 +576,7 @@ export const getPackageById =
   }
 
 // ============================================================
-// Package 顯示欄位
-// ============================================================
-
-const enrichPackage = (
-  item
-) => {
-  const totalSessions =
-    Number(
-      item.total_sessions ||
-      0
-    )
-
-  const attendedCount =
-    Number(
-      item.attended_count ||
-      0
-    )
-
-  const remainingSessions =
-    Math.max(
-      totalSessions -
-        attendedCount,
-      0
-    )
-
-  return {
-    ...item,
-
-    attended_count:
-      attendedCount,
-
-    remaining_sessions:
-      remainingSessions,
-
-    progress_percentage:
-      totalSessions > 0
-        ? Math.min(
-            Math.round(
-              (
-                attendedCount /
-                totalSessions
-              ) *
-                100
-            ),
-            100
-          )
-        : 0,
-
-    is_sessions_completed:
-      totalSessions > 0 &&
-      attendedCount >=
-        totalSessions,
-  }
-}
-
-// ============================================================
-// 自動同步「堂數已滿」的 Package
-//
-// 主要 Attendance Service 完成後，
-// 每次 Attendance 修改都會呼叫這個邏輯。
-//
-// 此處同時提供安全補償：
-// GET Package 前也可以執行一次。
-// ============================================================
-
-export const refreshCompletedPackagesForStudent =
-  async (
-    studentId
-  ) => {
-    assertUuid(
-      studentId,
-      '學生 ID'
-    )
-
-    const sql =
-      useDatabase()
-
-    await sql`
-      UPDATE
-        student_packages p
-
-      SET
-        status =
-          'COMPLETED',
-
-        completion_reason =
-          COALESCE(
-            completion_reason,
-            'SESSIONS_USED_UP'
-          ),
-
-        updated_at =
-          NOW()
-
-      WHERE
-        p.student_id =
-          ${studentId}
-
-        AND
-          p.status =
-            'ACTIVE'
-
-        AND (
-          SELECT
-            COUNT(*)
-
-          FROM
-            attendance_records_v2 a
-
-          WHERE
-            a.package_id =
-              p.id
-
-            AND
-              a.status =
-                'ATTENDED'
-        ) >=
-          p.total_sessions
-    `
-  }
-
-// ============================================================
-// 取得學生所有 Package
+// 學生所有 Package
 // ============================================================
 
 export const getStudentPackages =
@@ -658,11 +657,6 @@ export const getStudentPackages =
 
 // ============================================================
 // 建立第一期 Package
-//
-// 注意：
-// 如果這門課已經有 Package 歷史，
-// 不允許再從這支 API 建立。
-// 必須使用 Renew，才能維持完整週期鏈。
 // ============================================================
 
 export const createStudentPackage =
@@ -751,7 +745,7 @@ export const createStudentPackage =
         statusCode: 409,
 
         statusMessage:
-          '此學生的這門課已經有 Package 歷史，請使用續期功能建立下一期',
+          '這門課已經有 Package 歷史，請使用續期功能',
       })
     }
 
@@ -915,15 +909,10 @@ export const createStudentPackage =
   }
 
 // ============================================================
-// 續期
+// Renew Package
 //
-// 舊 Package 永久保留。
-// 新 Package：
-// cycle_no + 1
-// previous_package_id = 舊 Package
-// attended_count = 0
-//
-// Renew 本身即代表老師確認已收費。
+// 老師與學生都可以使用。
+// 但一定要滿堂才允許。
 // ============================================================
 
 export const renewStudentPackage =
@@ -935,6 +924,7 @@ export const renewStudentPackage =
     price,
     bankAccountId,
     actorUserId,
+    actorRole,
   }) => {
     assertUuid(
       studentId,
@@ -951,13 +941,41 @@ export const renewStudentPackage =
       '操作者 ID'
     )
 
+    const normalizedActorRole =
+      String(
+        actorRole || ''
+      )
+        .trim()
+        .toUpperCase()
+
+    if (
+      ![
+        'TEACHER',
+        'STUDENT',
+      ].includes(
+        normalizedActorRole
+      )
+    ) {
+      throw createError({
+        statusCode: 400,
+
+        statusMessage:
+          'Renew 操作者角色不正確',
+      })
+    }
+
     const sql =
       useDatabase()
 
-    await requireStudentRecord(
-      sql,
-      studentId
-    )
+    const student =
+      await requireStudentRecord(
+        sql,
+        studentId
+      )
+
+    // ========================================================
+    // Package + 已使用堂數
+    // ========================================================
 
     const packages =
       await sql`
@@ -1025,6 +1043,10 @@ export const renewStudentPackage =
         packages[0]
       )
 
+    // ========================================================
+    // CANCELLED 不可 Renew
+    // ========================================================
+
     if (
       previousPackage.status ===
       'CANCELLED'
@@ -1037,9 +1059,21 @@ export const renewStudentPackage =
       })
     }
 
+    // ========================================================
+    // 最重要的後端限制：
+    //
+    // 沒有滿堂就絕對不能 Renew。
+    //
+    // 例如：
+    // 7 / 8 → 拒絕
+    // 8 / 8 → 允許
+    // ========================================================
+
     if (
-      previousPackage
-        .attended_count <
+      Number(
+        previousPackage
+          .attended_count
+      ) <
       Number(
         previousPackage
           .total_sessions
@@ -1049,14 +1083,19 @@ export const renewStudentPackage =
         statusCode: 409,
 
         statusMessage:
-          `本期尚未完成，目前為 ${previousPackage.attended_count}/${previousPackage.total_sessions} 堂`,
+          `本期尚未完成，目前為 ${previousPackage.attended_count}/${previousPackage.total_sessions} 堂，無法續期`,
       })
     }
+
+    // ========================================================
+    // 防止重複 Renew
+    // ========================================================
 
     const existingActive =
       await sql`
         SELECT
-          id
+          id,
+          cycle_no
 
         FROM
           student_packages
@@ -1087,15 +1126,24 @@ export const renewStudentPackage =
         statusCode: 409,
 
         statusMessage:
-          '此學生這門課已經有新的 ACTIVE Package',
+          '此課程已經存在新的有效期數，不能重複續期',
       })
     }
+
+    // ========================================================
+    // 日期
+    // ========================================================
 
     const normalizedStartDate =
       normalizeDate(
         startDate,
         getTaipeiDateString()
       )
+
+    // ========================================================
+    // 學生不傳就沿用上一期
+    // 老師可以自行指定
+    // ========================================================
 
     const normalizedTotal =
       totalSessions ===
@@ -1121,7 +1169,8 @@ export const renewStudentPackage =
       price ===
         ''
         ? Number(
-            previousPackage.price
+            previousPackage
+              .price
           )
         : normalizePrice(
             price
@@ -1159,7 +1208,46 @@ export const renewStudentPackage =
       )
 
     const beforeData = {
-      ...previousPackage,
+      id:
+        previousPackage.id,
+
+      student_id:
+        studentId,
+
+      student_name:
+        student.name,
+
+      course_id:
+        previousPackage
+          .course_id,
+
+      course_name:
+        previousPackage
+          .course_name,
+
+      cycle_no:
+        currentCycle,
+
+      total_sessions:
+        previousPackage
+          .total_sessions,
+
+      attended_count:
+        previousPackage
+          .attended_count,
+
+      remaining_sessions:
+        previousPackage
+          .remaining_sessions,
+
+      price:
+        previousPackage.price,
+
+      paid:
+        previousPackage.paid,
+
+      status:
+        previousPackage.status,
     }
 
     const afterData = {
@@ -1168,6 +1256,9 @@ export const renewStudentPackage =
 
       student_id:
         studentId,
+
+      student_name:
+        student.name,
 
       course_id:
         previousPackage
@@ -1181,6 +1272,12 @@ export const renewStudentPackage =
         normalizedStartDate,
 
       total_sessions:
+        normalizedTotal,
+
+      attended_count:
+        0,
+
+      remaining_sessions:
         normalizedTotal,
 
       price:
@@ -1201,14 +1298,15 @@ export const renewStudentPackage =
       status:
         'ACTIVE',
 
-      attended_count:
-        0,
-
-      remaining_sessions:
-        normalizedTotal,
+      activated_by:
+        actorUserId,
     }
 
     const queries = [
+      // ======================================================
+      // 舊期完成
+      // ======================================================
+
       sql`
         UPDATE
           student_packages
@@ -1237,6 +1335,13 @@ export const renewStudentPackage =
         RETURNING
           *
       `,
+
+      // ======================================================
+      // 新一期
+      //
+      // Renew 即代表操作人確認已完成繳費，
+      // 因此新一期 paid = true。
+      // ======================================================
 
       sql`
         INSERT INTO
@@ -1281,9 +1386,19 @@ export const renewStudentPackage =
       `,
     ]
 
+    // ========================================================
+    // Audit
+    // ========================================================
+
     if (
       auditExists
     ) {
+      const auditNote =
+        normalizedActorRole ===
+        'TEACHER'
+          ? `老師確認續期：第 ${currentCycle} 期 → 第 ${nextCycle} 期`
+          : `學生確認續期：第 ${currentCycle} 期 → 第 ${nextCycle} 期`
+
       queries.push(
         sql`
           INSERT INTO
@@ -1303,7 +1418,7 @@ export const renewStudentPackage =
 
           VALUES (
             ${actorUserId},
-            'TEACHER',
+            ${normalizedActorRole},
             'RENEW',
             'PACKAGE',
             ${newPackageId},
@@ -1315,7 +1430,7 @@ export const renewStudentPackage =
             ${JSON.stringify(
               afterData
             )}::jsonb,
-            ${`Package Cycle ${currentCycle} → Cycle ${nextCycle}`} ,
+            ${auditNote},
             NOW()
           )
         `

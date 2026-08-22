@@ -2,12 +2,16 @@ import {
   renewStudentPackage,
 } from '../../../../../services/packageService.js'
 
+import {
+  requireAuth,
+} from '../../../../../utils/authSession.js'
+
 export default defineEventHandler(
   async (
     event
   ) => {
     // ========================================================
-    // Teacher Auth
+    // 老師身份
     // ========================================================
 
     const user =
@@ -23,7 +27,7 @@ export default defineEventHandler(
         statusCode: 403,
 
         statusMessage:
-          '只有老師可以確認續期',
+          '只有老師可以使用老師端續期功能',
       })
     }
 
@@ -51,25 +55,6 @@ export default defineEventHandler(
 
     // ========================================================
     // Body
-    //
-    // packageId：
-    // 要被續期的舊 Package
-    //
-    // totalSessions：
-    // 可不傳，預設沿用舊期
-    //
-    // price：
-    // 可不傳，預設沿用舊期
-    //
-    // startDate：
-    // 可不傳，預設台灣今天
-    //
-    // bankAccountId：
-    // 不傳 = 沿用舊期
-    //
-    // Renew 本身就是：
-    // 「老師確認已收費」
-    // 所以新一期一定 paid = true。
     // ========================================================
 
     const body =
@@ -93,6 +78,12 @@ export default defineEventHandler(
       })
     }
 
+    // ========================================================
+    // Renew
+    //
+    // Service 會再次檢查是否滿堂。
+    // ========================================================
+
     const result =
       await renewStudentPackage({
         studentId,
@@ -115,6 +106,9 @@ export default defineEventHandler(
 
         actorUserId:
           user.id,
+
+        actorRole:
+          'TEACHER',
       })
 
     return {
