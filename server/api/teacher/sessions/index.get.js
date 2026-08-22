@@ -4,14 +4,14 @@ import {
 
 import {
   getTeacherSessions,
-} from '../../../services/sessionService.js'
+} from '../../../services/classSessionService.js'
 
 export default defineEventHandler(
   async (
     event
   ) => {
     // ========================================================
-    // Teacher Auth
+    // Auth
     // ========================================================
 
     const user =
@@ -27,7 +27,7 @@ export default defineEventHandler(
         statusCode: 403,
 
         statusMessage:
-          '只有老師可以查看完整課堂 Session',
+          '只有老師可以查看課堂管理',
       })
     }
 
@@ -58,70 +58,20 @@ export default defineEventHandler(
           query.endDate,
       })
 
-    // ========================================================
-    // Summary
-    // ========================================================
-
-    const summary = {
-      total:
-        result.records.length,
-
-      scheduled:
-        result.records.filter(
-          (
-            item
-          ) => {
-            return (
-              item.status ===
-              'SCHEDULED'
-            )
-          }
-        ).length,
-
-      completed:
-        result.records.filter(
-          (
-            item
-          ) => {
-            return (
-              item.status ===
-              'COMPLETED'
-            )
-          }
-        ).length,
-
-      teacherLeave:
-        result.records.filter(
-          (
-            item
-          ) => {
-            return (
-              item.status ===
-              'TEACHER_LEAVE'
-            )
-          }
-        ).length,
-
-      cancelled:
-        result.records.filter(
-          (
-            item
-          ) => {
-            return (
-              item.status ===
-              'CANCELLED'
-            )
-          }
-        ).length,
-    }
-
     return {
       success: true,
 
-      summary,
+      today:
+        result.today,
+
+      filters:
+        result.filters,
+
+      summary:
+        result.summary,
 
       sessions:
-        result.records,
+        result.sessions,
 
       courses:
         result.courses,

@@ -3,19 +3,19 @@ import {
 } from '../../../utils/authSession.js'
 
 import {
-  updateSession,
-} from '../../../services/sessionService.js'
-
-import {
   getAuditRequestMetadata,
 } from '../../../services/auditService.js'
+
+import {
+  updateClassSession,
+} from '../../../services/classSessionService.js'
 
 export default defineEventHandler(
   async (
     event
   ) => {
     // ========================================================
-    // Teacher Auth
+    // Auth
     // ========================================================
 
     const user =
@@ -31,7 +31,7 @@ export default defineEventHandler(
         statusCode: 403,
 
         statusMessage:
-          '只有老師可以修改課堂 Session',
+          '只有老師可以修改課堂',
       })
     }
 
@@ -44,9 +44,9 @@ export default defineEventHandler(
         getRouterParam(
           event,
           'id'
-        ) || ''
-      )
-        .trim()
+        ) ||
+        ''
+      ).trim()
 
     if (
       !sessionId
@@ -61,11 +61,6 @@ export default defineEventHandler(
 
     // ========================================================
     // Body
-    //
-    // {
-    //   status,
-    //   teacherNote
-    // }
     // ========================================================
 
     const body =
@@ -83,17 +78,25 @@ export default defineEventHandler(
         statusCode: 400,
 
         statusMessage:
-          '沒有需要修改的 Session 資料',
+          '沒有提供要修改的資料',
       })
     }
+
+    // ========================================================
+    // Audit Metadata
+    // ========================================================
 
     const auditMetadata =
       getAuditRequestMetadata(
         event
       )
 
-    const result =
-      await updateSession({
+    // ========================================================
+    // Update
+    // ========================================================
+
+    const session =
+      await updateClassSession({
         sessionId,
 
         status:
@@ -105,9 +108,6 @@ export default defineEventHandler(
         actorUserId:
           user.id,
 
-        actorRole:
-          'TEACHER',
-
         auditMetadata,
       })
 
@@ -115,13 +115,9 @@ export default defineEventHandler(
       success: true,
 
       message:
-        '課堂 Session 更新成功',
+        '課堂資料已更新',
 
-      session:
-        result.session,
-
-      attendanceCount:
-        result.attendanceCount,
+      session,
     }
   }
 )

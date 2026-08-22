@@ -3,19 +3,19 @@ import {
 } from '../../../utils/authSession.js'
 
 import {
-  generateSessions,
-} from '../../../services/sessionService.js'
-
-import {
   getAuditRequestMetadata,
 } from '../../../services/auditService.js'
+
+import {
+  generateClassSessions,
+} from '../../../services/classSessionService.js'
 
 export default defineEventHandler(
   async (
     event
   ) => {
     // ========================================================
-    // Teacher Auth
+    // Auth
     // ========================================================
 
     const user =
@@ -37,12 +37,6 @@ export default defineEventHandler(
 
     // ========================================================
     // Body
-    //
-    // {
-    //   scheduleIds: [],
-    //   startDate: '2026-09-01',
-    //   endDate: '2026-12-31'
-    // }
     // ========================================================
 
     const body =
@@ -50,63 +44,69 @@ export default defineEventHandler(
         event
       )
 
+    const startDate =
+      String(
+        body?.startDate ||
+        ''
+      ).trim()
+
+    const endDate =
+      String(
+        body?.endDate ||
+        ''
+      ).trim()
+
     if (
-      !Array.isArray(
-        body?.scheduleIds
-      ) ||
-      !body.scheduleIds.length
+      !startDate
     ) {
       throw createError({
         statusCode: 400,
 
         statusMessage:
-          '請至少選擇一個固定班別',
+          '請提供開始日期',
       })
     }
 
     if (
-      !body?.startDate
+      !endDate
     ) {
       throw createError({
         statusCode: 400,
 
         statusMessage:
-          '請輸入開始日期',
+          '請提供結束日期',
       })
     }
 
-    if (
-      !body?.endDate
-    ) {
-      throw createError({
-        statusCode: 400,
-
-        statusMessage:
-          '請輸入結束日期',
-      })
-    }
+    // ========================================================
+    // Audit Metadata
+    // ========================================================
 
     const auditMetadata =
       getAuditRequestMetadata(
         event
       )
 
+    // ========================================================
+    // Generate
+    // ========================================================
+
     const result =
-      await generateSessions({
-        scheduleIds:
-          body.scheduleIds,
+      await generateClassSessions({
+        courseId:
+          body?.courseId ||
+          null,
 
-        startDate:
-          body.startDate,
+        scheduleId:
+          body?.scheduleId ||
+          null,
 
-        endDate:
-          body.endDate,
+        startDate,
+
+        endDate,
 
         actorUserId:
           user.id,
-
-        actorRole:
-          'TEACHER',
 
         auditMetadata,
       })
@@ -115,18 +115,11 @@ export default defineEventHandler(
       success: true,
 
       message:
-        result.createdCount > 0
-          ? `成功建立 ${result.createdCount} 堂課`
-          : '指定日期範圍內沒有需要新增的課堂',
+        result.createdCount
+          ? `成功新增 ${result.createdCount} 堂課，略過 ${result.skippedCount} 堂已存在課堂`
+          : `沒有新增課堂，共略過 ${result.skippedCount} 堂已存在課堂`,
 
-      createdCount:
-        result.createdCount,
-
-      skippedCount:
-        result.skippedCount,
-
-      sessions:
-        result.sessions,
+      result,
     }
   }
 )
