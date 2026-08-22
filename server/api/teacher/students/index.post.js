@@ -3,139 +3,100 @@ import {
 } from '../../../utils/db.js'
 
 import {
-  requireTeacherOrganization,
-} from '../../../utils/teacherAuth.js'
+  requireAuth,
+} from '../../../utils/authSession.js'
 
 export default defineEventHandler(
   async (event) => {
-    const {
-      organization,
-    } =
-      await requireTeacherOrganization(
-        event
-      )
+    const user =
+      await requireAuth(event)
+
+    if (
+      user.role !== 'TEACHER'
+    ) {
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          '只有老師可以新增課程時段',
+      })
+    }
 
     const body =
       await readBody(event)
 
-    const name =
+    const courseId =
       String(
-        body?.name || ''
-      ).trim()
+        body?.courseId || ''
+      )
 
-    const phone =
+    const weekday =
+      Number(
+        body?.weekday
+      )
+
+    const startTime =
       String(
-        body?.phone || ''
-      ).trim()
-
-    const note =
-      String(
-        body?.note || ''
-      ).trim()
-
-    if (!name) {
-      throw createError({
-        statusCode: 400,
-        statusMessage:
-          '請輸入學生姓名',
-      })
-    }
+        body?.startTime || ''
+      )
 
     if (
-      name.length > 100
+      !courseId ||
+      !Number.isInteger(
+        weekday
+      ) ||
+      weekday < 1 ||
+      weekday > 7 ||
+      !startTime
     ) {
       throw createError({
         statusCode: 400,
         statusMessage:
-          '學生姓名不可超過 100 個字',
-      })
-    }
-
-    if (
-      phone.length > 50
-    ) {
-      throw createError({
-        statusCode: 400,
-        statusMessage:
-          '電話長度不正確',
+          '課程時段資料不完整',
       })
     }
 
     const sql =
       useDatabase()
 
-    const students =
+    const records =
       await sql`
         INSERT INTO
-          students (
-            organization_id,
+          class_schedules (
+            course_id,
+            teacher_user_id,
+            weekday,
+            start_time,
+            end_time,
             name,
-            phone,
-            note,
-            status
+            capacity
           )
 
         VALUES (
-          ${organization.id},
-          ${name},
+          ${courseId},
+          ${user.id},
+          ${weekday},
+          ${startTime},
           ${
-            phone ||
+            body?.endTime ||
             null
           },
           ${
-            note ||
+            body?.name ||
             null
           },
-          'ACTIVE'
+          ${
+            body?.capacity ||
+            null
+          }
         )
 
-        RETURNING
-          id,
-          name,
-          phone,
-          note,
-          status,
-          user_id,
-          created_at
+        RETURNING *
       `
-
-    const student =
-      students[0]
 
     return {
       success: true,
-
-      message:
-        '學生已新增',
-
-      student: {
-        id:
-          student.id,
-
-        name:
-          student.name,
-
-        phone:
-          student.phone,
-
-        note:
-          student.note,
-
-        status:
-          student.status,
-
-        userId:
-          student.user_id,
-
-        hasLine:
-          false,
-
-        courseCount:
-          0,
-
-        createdAt:
-          student.created_at,
-      },
+      schedule:
+        records[0],
     }
   }
 )

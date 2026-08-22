@@ -93,7 +93,10 @@ export const useLineAuth =
           const result =
             await authStore
               .loginWithLineToken(
-                idToken
+                idToken,
+                new URLSearchParams(
+                  window.location.search
+                ).get('link')
               )
 
           if (

@@ -53,7 +53,8 @@ export const useAuthStore =
         },
 
         async loginWithLineToken(
-          idToken
+          idToken,
+          linkCode = null
         ) {
           const result =
             await $fetch(
@@ -64,6 +65,7 @@ export const useAuthStore =
 
                 body: {
                   idToken,
+                  linkCode,
                 },
               }
             )
