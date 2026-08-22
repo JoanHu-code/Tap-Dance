@@ -8,6 +8,11 @@ export default defineNuxtPlugin(
     const liffId =
       config.public.liffId
 
+    console.log(
+      'LIFF ID loaded:',
+      Boolean(liffId)
+    )
+
     if (!liffId) {
       console.error(
         '找不到 NUXT_PUBLIC_LIFF_ID'
@@ -24,11 +29,21 @@ export default defineNuxtPlugin(
       await liff.init({
         liffId,
       })
+
+      console.log(
+        'LIFF 初始化成功'
+      )
     } catch (error) {
       console.error(
         'LIFF 初始化失敗：',
         error
       )
+
+      return {
+        provide: {
+          liff: null,
+        },
+      }
     }
 
     return {
