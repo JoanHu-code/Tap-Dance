@@ -3,23 +3,17 @@ import {
 } from '../../../utils/db.js'
 
 import {
-  requireAuth,
-} from '../../../utils/authSession.js'
+  requireTeacherOrganization,
+} from '../../../utils/teacherAuth.js'
 
 export default defineEventHandler(
   async (event) => {
-    const user =
-      await requireAuth(event)
-
-    if (
-      user.role !== 'TEACHER'
-    ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          '只有老師可以新增學生',
-      })
-    }
+    const {
+      organization,
+    } =
+      await requireTeacherOrganization(
+        event
+      )
 
     const body =
       await readBody(event)
@@ -27,6 +21,16 @@ export default defineEventHandler(
     const name =
       String(
         body?.name || ''
+      ).trim()
+
+    const phone =
+      String(
+        body?.phone || ''
+      ).trim()
+
+    const note =
+      String(
+        body?.note || ''
       ).trim()
 
     if (!name) {
@@ -37,31 +41,28 @@ export default defineEventHandler(
       })
     }
 
-    const sql =
-      useDatabase()
-
-    const organizations =
-      await sql`
-        SELECT
-          organization_id
-
-        FROM organization_members
-
-        WHERE user_id =
-          ${user.id}
-
-        LIMIT 1
-      `
-
     if (
-      !organizations.length
+      name.length > 100
     ) {
       throw createError({
-        statusCode: 403,
+        statusCode: 400,
         statusMessage:
-          '老師尚未加入教室',
+          '學生姓名不可超過 100 個字',
       })
     }
+
+    if (
+      phone.length > 50
+    ) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          '電話長度不正確',
+      })
+    }
+
+    const sql =
+      useDatabase()
 
     const students =
       await sql`
@@ -70,32 +71,71 @@ export default defineEventHandler(
             organization_id,
             name,
             phone,
-            note
+            note,
+            status
           )
 
         VALUES (
-          ${
-            organizations[0]
-              .organization_id
-          },
+          ${organization.id},
           ${name},
           ${
-            body?.phone ||
+            phone ||
             null
           },
           ${
-            body?.note ||
+            note ||
             null
-          }
+          },
+          'ACTIVE'
         )
 
-        RETURNING *
+        RETURNING
+          id,
+          name,
+          phone,
+          note,
+          status,
+          user_id,
+          created_at
       `
+
+    const student =
+      students[0]
 
     return {
       success: true,
-      student:
-        students[0],
+
+      message:
+        '學生已新增',
+
+      student: {
+        id:
+          student.id,
+
+        name:
+          student.name,
+
+        phone:
+          student.phone,
+
+        note:
+          student.note,
+
+        status:
+          student.status,
+
+        userId:
+          student.user_id,
+
+        hasLine:
+          false,
+
+        courseCount:
+          0,
+
+        createdAt:
+          student.created_at,
+      },
     }
   }
 )

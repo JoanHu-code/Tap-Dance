@@ -1,131 +1,150 @@
 import {
-  useDatabase,
-} from '../../../utils/db.js'
+  defineStore,
+} from 'pinia'
 
-import {
-  requireTeacherOrganization,
-} from '../../../utils/teacherAuth.js'
+export const useTeacherStore =
+  defineStore(
+    'teacher',
+    {
+      state: () => ({
+        organization: null,
 
-export default defineEventHandler(
-  async (event) => {
-    const {
-      organization,
-    } =
-      await requireTeacherOrganization(
-        event
-      )
+        students: [],
 
-    const sql =
-      useDatabase()
+        loading: false,
 
-    const students =
-      await sql`
-        SELECT
-          s.id,
-          s.name,
-          s.phone,
-          s.note,
-          s.status,
-          s.user_id,
+        submitting: false,
 
-          u.display_name
-            AS line_display_name,
+        error: null,
+      }),
 
-          u.picture_url
-            AS line_picture_url,
+      getters: {
+        activeStudents:
+          (state) => {
+            return state.students.filter(
+              (student) =>
+                student.status ===
+                'ACTIVE'
+            )
+          },
 
-          u.status
-            AS line_status,
+        lineStudents:
+          (state) => {
+            return state.students.filter(
+              (student) =>
+                student.hasLine
+            )
+          },
 
-          COUNT(
-            DISTINCT se.id
-          )::INTEGER
-            AS course_count,
-
-          s.created_at
-
-        FROM students s
-
-        LEFT JOIN app_users u
-          ON u.id =
-            s.user_id
-
-        LEFT JOIN student_enrollments se
-          ON se.student_id =
-            s.id
-
-          AND se.status =
-            'ACTIVE'
-
-        WHERE
-          s.organization_id =
-            ${organization.id}
-
-        GROUP BY
-          s.id,
-          u.display_name,
-          u.picture_url,
-          u.status
-
-        ORDER BY
-          s.status ASC,
-          s.name ASC
-      `
-
-    return {
-      organization: {
-        id:
-          organization.id,
-
-        name:
-          organization.name,
+        manualStudents:
+          (state) => {
+            return state.students.filter(
+              (student) =>
+                !student.hasLine
+            )
+          },
       },
 
-      students:
-        students.map(
-          (student) => ({
-            id:
-              student.id,
+      actions: {
+        async fetchStudents() {
+          this.loading = true
+          this.error = null
 
-            name:
-              student.name,
+          try {
+            const data =
+              await $fetch(
+                '/api/teacher/students'
+              )
 
-            phone:
-              student.phone,
+            this.organization =
+              data.organization
 
-            note:
-              student.note,
+            this.students =
+              data.students || []
+          } catch (error) {
+            console.error(
+              '取得學生列表失敗：',
+              error
+            )
 
-            status:
-              student.status,
+            this.error =
+              error?.data
+                ?.statusMessage ||
+              error
+                ?.statusMessage ||
+              '取得學生列表失敗'
+          } finally {
+            this.loading =
+              false
+          }
+        },
 
-            userId:
-              student.user_id,
+        async createStudent(
+          form
+        ) {
+          if (
+            this.submitting
+          ) {
+            return {
+              success: false,
+              message:
+                '資料處理中',
+            }
+          }
 
-            hasLine:
-              Boolean(
-                student.user_id
-              ),
+          this.submitting =
+            true
 
-            lineDisplayName:
-              student.line_display_name,
+          try {
+            const result =
+              await $fetch(
+                '/api/teacher/students',
+                {
+                  method:
+                    'POST',
 
-            linePictureUrl:
-              student.line_picture_url,
+                  body: {
+                    name:
+                      form.name,
 
-            lineStatus:
-              student.line_status,
+                    phone:
+                      form.phone,
 
-            courseCount:
-              Number(
-                student.course_count ||
-                0
-              ),
+                    note:
+                      form.note,
+                  },
+                }
+              )
 
-            createdAt:
-              student.created_at,
-          })
-        ),
+            await this.fetchStudents()
+
+            return {
+              success: true,
+
+              message:
+                result.message,
+            }
+          } catch (error) {
+            console.error(
+              '新增學生失敗：',
+              error
+            )
+
+            return {
+              success: false,
+
+              message:
+                error?.data
+                  ?.statusMessage ||
+                error
+                  ?.statusMessage ||
+                '新增學生失敗',
+            }
+          } finally {
+            this.submitting =
+              false
+          }
+        },
+      },
     }
-  }
-)
+  )
