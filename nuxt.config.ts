@@ -7,6 +7,8 @@ export default defineNuxtConfig({
     dirs: ["stores"],
   },
     runtimeConfig: {
+      lineChannelId:
+        process.env.LINE_CHANNEL_ID,
     public: {
       liffId: process.env.NUXT_PUBLIC_LIFF_ID,
     },
