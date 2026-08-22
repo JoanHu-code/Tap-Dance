@@ -1,12 +1,6 @@
 <script setup>
-const {
-  user,
-  authenticated,
-  initialized,
-  loading: authLoading,
-  error: authError,
-  initializeLineAuth,
-} = useLineAuth()
+const attendanceStore =
+  useAttendanceStore()
 
 const {
   course,
@@ -15,22 +9,25 @@ const {
   progressPercentage,
   sortedAttendanceRecords,
 
-  loading,
-  submitting,
-  error,
-
   addTodayAttendance,
   addTodayLeave,
   cancelRecord,
-  refreshAttendance,
 } = useAttendance()
-
-// ============================================================
-// Toast
-// ============================================================
 
 const message = ref('')
 const showMessage = ref(false)
+
+const showConfirmDialog = ref(false)
+
+const pendingRecordId = ref(null)
+
+const confirmConfig = ref({
+  type: '',
+  title: '',
+  message: '',
+  confirmText: '確認',
+  danger: false,
+})
 
 let toastTimer = null
 
@@ -39,38 +36,13 @@ const showToast = (text) => {
   showMessage.value = true
 
   if (toastTimer) {
-    window.clearTimeout(
-      toastTimer
-    )
+    window.clearTimeout(toastTimer)
   }
 
-  toastTimer =
-    window.setTimeout(
-      () => {
-        showMessage.value = false
-      },
-      2500
-    )
+  toastTimer = window.setTimeout(() => {
+    showMessage.value = false
+  }, 2000)
 }
-
-// ============================================================
-// 確認視窗
-// ============================================================
-
-const showConfirmDialog =
-  ref(false)
-
-const pendingRecordId =
-  ref(null)
-
-const confirmConfig =
-  ref({
-    type: '',
-    title: '',
-    message: '',
-    confirmText: '確認',
-    danger: false,
-  })
 
 const openConfirmDialog = ({
   type,
@@ -87,389 +59,285 @@ const openConfirmDialog = ({
     danger,
   }
 
-  showConfirmDialog.value =
-    true
+  showConfirmDialog.value = true
 }
 
-// ============================================================
-// 上課
-// ============================================================
+/**
+ * 取得某一天中午 12:00 的時間
+ *
+ * 例如：
+ * 2026-08-22
+ *
+ * 會轉成：
+ * 2026-08-22 12:00:00
+ */
+const getCancelDeadline = (dateString) => {
+  if (!dateString) {
+    return null
+  }
+
+  const deadline =
+    new Date(`${dateString}T12:00:00`)
+
+  if (
+    Number.isNaN(
+      deadline.getTime()
+    )
+  ) {
+    return null
+  }
+
+  return deadline
+}
+
+/**
+ * 判斷紀錄目前是否還能取消
+ *
+ * 規則：
+ * 紀錄日期當天中午 12:00 前可以取消。
+ * 12:00 起即不可取消。
+ */
+const canCancelRecord = (record) => {
+  if (!record) {
+    return false
+  }
+
+  if (
+    record.status === 'CANCELLED'
+  ) {
+    return false
+  }
+
+  const deadline =
+    getCancelDeadline(record.date)
+
+  if (!deadline) {
+    return false
+  }
+
+  const now = new Date()
+
+  return now < deadline
+}
 
 const handleAttendance = () => {
   openConfirmDialog({
     type: 'ATTENDANCE',
-
     title: '確認上課',
-
     message:
       '確定要新增今天的上課紀錄嗎？新增後會計入本期堂數。',
-
-    confirmText:
-      '確認上課',
+    confirmText: '確認上課',
   })
 }
-
-// ============================================================
-// 請假
-// ============================================================
 
 const handleLeave = () => {
   openConfirmDialog({
     type: 'LEAVE',
-
     title: '確認請假',
-
     message:
       '確定要新增今天的請假紀錄嗎？本次不會計入已上課堂數。',
-
-    confirmText:
-      '確認請假',
+    confirmText: '確認請假',
   })
 }
 
-// ============================================================
-// 取消紀錄
-// ============================================================
+/**
+ * 點擊紀錄旁邊的「取消」
+ */
+const handleCancelRecord = (id) => {
+  const record =
+    sortedAttendanceRecords.value.find(
+      (item) => item.id === id
+    )
 
-const handleCancelRecord = (
-  id
-) => {
+  if (!record) {
+    showToast(
+      '找不到這筆紀錄'
+    )
+
+    return
+  }
+
+  if (
+    record.status === 'CANCELLED'
+  ) {
+    showToast(
+      '這筆紀錄已經取消'
+    )
+
+    return
+  }
+
+  if (!canCancelRecord(record)) {
+    showToast(
+      '已超過取消期限，當天中午 12:00 後無法取消紀錄'
+    )
+
+    return
+  }
+
   pendingRecordId.value = id
 
   openConfirmDialog({
     type: 'CANCEL_RECORD',
-
     title: '取消紀錄',
-
     message:
-      '確定要取消這筆紀錄嗎？取消後不會計入堂數，但紀錄仍會保留。當天中午 12:00 後無法取消。',
-
-    confirmText:
-      '確認取消',
-
+      '確定要取消這筆紀錄嗎？取消後不會計入堂數，但紀錄仍會保留。',
+    confirmText: '確認取消',
     danger: true,
   })
 }
 
-// ============================================================
-// 確認執行
-// ============================================================
+/**
+ * 確認視窗按下「確認」
+ */
+const handleConfirmAction = () => {
+  let result = null
 
-const handleConfirmAction =
-  async () => {
-    if (
-      submitting.value
-    ) {
-      return
-    }
+  switch (
+    confirmConfig.value.type
+  ) {
+    case 'ATTENDANCE':
+      result =
+        addTodayAttendance()
 
-    let result = null
+      break
 
-    switch (
-      confirmConfig.value.type
-    ) {
-      case 'ATTENDANCE':
-        result =
-          await addTodayAttendance()
+    case 'LEAVE':
+      result =
+        addTodayLeave()
 
-        break
+      break
 
-      case 'LEAVE':
-        result =
-          await addTodayLeave()
-
-        break
-
-      case 'CANCEL_RECORD':
-        if (
-          pendingRecordId.value ===
-          null
-        ) {
-          result = {
-            success: false,
-            message:
-              '找不到要取消的紀錄',
-          }
-
-          break
-        }
-
-        result =
-          await cancelRecord(
+    case 'CANCEL_RECORD': {
+      const record =
+        sortedAttendanceRecords.value.find(
+          (item) =>
+            item.id ===
             pendingRecordId.value
-          )
+        )
+
+      /**
+       * 使用者可能在 11:59 打開確認視窗，
+       * 但 12:00 之後才按「確認取消」。
+       *
+       * 所以真正執行取消前，
+       * 再檢查一次期限。
+       */
+      if (
+        !record ||
+        !canCancelRecord(record)
+      ) {
+        result = {
+          success: false,
+          message:
+            '已超過取消期限，當天中午 12:00 後無法取消紀錄',
+        }
 
         pendingRecordId.value =
           null
 
         break
-    }
+      }
 
-    showConfirmDialog.value =
-      false
+      result =
+        cancelRecord(
+          pendingRecordId.value
+        )
 
-    if (result) {
-      showToast(
-        result.message
-      )
-    }
-  }
+      pendingRecordId.value =
+        null
 
-// ============================================================
-// 關閉確認視窗
-// ============================================================
-
-const handleCancelConfirm =
-  () => {
-    if (
-      submitting.value
-    ) {
-      return
-    }
-
-    showConfirmDialog.value =
-      false
-
-    pendingRecordId.value =
-      null
-  }
-
-// ============================================================
-// LINE 登入 + 初始化資料
-// ============================================================
-
-onMounted(
-  async () => {
-    const loginSuccess =
-      await initializeLineAuth()
-
-    if (!loginSuccess) {
-      return
-    }
-
-    await refreshAttendance()
-
-    if (error.value) {
-      showToast(
-        error.value
-      )
+      break
     }
   }
-)
 
-// ============================================================
-// 清除 Timer
-// ============================================================
+  showConfirmDialog.value = false
 
-onBeforeUnmount(
-  () => {
-    if (toastTimer) {
-      window.clearTimeout(
-        toastTimer
-      )
-    }
+  if (result) {
+    showToast(
+      result.message
+    )
   }
-)
+}
+
+/**
+ * 關閉確認視窗
+ */
+const handleCancelConfirm = () => {
+  showConfirmDialog.value = false
+  pendingRecordId.value = null
+}
+
+onBeforeUnmount(() => {
+  if (toastTimer) {
+    window.clearTimeout(
+      toastTimer
+    )
+  }
+})
 </script>
 
 <template>
   <main class="home">
     <div class="home__container">
-      <!-- ====================================================
-           LINE 登入中
-           ==================================================== -->
-
-      <div
-        v-if="
-          authLoading ||
-          !initialized
-        "
-        class="loading-card"
-      >
-        <div
-          class="loading-spinner"
-        />
-
-        <span>
-          正在確認 LINE 登入...
-        </span>
-      </div>
-
-      <!-- ====================================================
-           尚未授權
-           ==================================================== -->
-
-      <div
-        v-else-if="
-          !authenticated
-        "
-        class="auth-card"
-      >
-        <div
-          class="auth-card__icon"
-        >
-          🔒
-        </div>
-
-        <h2>
-          尚未取得使用權限
-        </h2>
-
-        <p>
-          {{
-            authError ||
-            '請使用 LINE 開啟此課程紀錄。'
-          }}
-        </p>
-
-        <p
-          class="auth-card__hint"
-        >
-          如果這是你第一次登入，
-          系統會先建立待授權帳號，
-          管理者確認後才能使用。
-        </p>
-      </div>
-
-      <!-- ====================================================
-           已登入
-           ==================================================== -->
-
-      <template v-else>
-        <header
-          class="home__header"
-        >
-          <div>
-            <span>
-              Tap Dance
-            </span>
-
-            <h1>
-              課程紀錄
-            </h1>
-          </div>
-
-          <div
-            class="user"
-          >
-            <img
-              v-if="
-                user?.pictureUrl
-              "
-              :src="
-                user.pictureUrl
-              "
-              :alt="
-                user.displayName ||
-                'LINE 使用者'
-              "
-              class="user__avatar"
-            >
-
-            <div
-              v-else
-              class="
-                user__avatar
-                user__avatar--placeholder
-              "
-            >
-              👤
-            </div>
-
-            <div
-              class="user__info"
-            >
-              <strong>
-                {{
-                  user?.displayName ||
-                  'LINE 使用者'
-                }}
-              </strong>
-
-              <span>
-                {{
-                  user?.role ===
-                  'TEACHER'
-                    ? '老師'
-                    : '學員'
-                }}
-              </span>
-            </div>
-          </div>
-        </header>
-
-        <!-- ================================================
-             課程資料載入中
-             ================================================ -->
-
-        <div
-          v-if="loading"
-          class="loading-card"
-        >
-          <div
-            class="loading-spinner"
-          />
-
+      <header class="home__header">
+        <div>
           <span>
-            課程資料載入中...
+            Tap Dance
           </span>
+
+          <h1>
+            課程紀錄
+          </h1>
         </div>
 
-        <!-- ================================================
-             課程內容
-             ================================================ -->
+        <div class="avatar">
+          👞
+        </div>
+      </header>
 
-        <template v-else>
-          <CourseProgress
-            :course-name="
-              course.name
-            "
-            :attended-count="
-              attendedCount
-            "
-            :total-sessions="
-              course.totalSessions
-            "
-            :remaining-sessions="
-              remainingSessions
-            "
-            :progress-percentage="
-              progressPercentage
-            "
-            :price="
-              course.price
-            "
-          />
+      <CourseProgress
+        :course-name="
+          course.name
+        "
+        :attended-count="
+          attendedCount
+        "
+        :total-sessions="
+          course.totalSessions
+        "
+        :remaining-sessions="
+          remainingSessions
+        "
+        :progress-percentage="
+          progressPercentage
+        "
+        :price="
+          course.price
+        "
+      />
 
-          <CourseQuickActions
-            @attendance="
-              handleAttendance
-            "
-            @leave="
-              handleLeave
-            "
-          />
+      <CourseQuickActions
+        @attendance="
+          handleAttendance
+        "
+        @leave="
+          handleLeave
+        "
+      />
 
-          <AttendanceList
-            :records="
-              sortedAttendanceRecords
-            "
-            @cancel="
-              handleCancelRecord
-            "
-          />
-        </template>
-      </template>
+      <AttendanceList
+        :records="
+          sortedAttendanceRecords
+        "
+        @cancel="
+          handleCancelRecord
+        "
+      />
     </div>
 
-    <!-- ======================================================
-         確認視窗
-         ====================================================== -->
-
     <Teleport to="body">
-      <Transition
-        name="dialog"
-      >
+      <Transition name="dialog">
         <div
           v-if="
             showConfirmDialog
@@ -479,9 +347,7 @@ onBeforeUnmount(
             handleCancelConfirm
           "
         >
-          <div
-            class="dialog"
-          >
+          <div class="dialog">
             <div
               class="dialog__icon"
               :class="{
@@ -521,9 +387,6 @@ onBeforeUnmount(
                   dialog__button
                   dialog__button--cancel
                 "
-                :disabled="
-                  submitting
-                "
                 @click="
                   handleCancelConfirm
                 "
@@ -543,17 +406,12 @@ onBeforeUnmount(
                   'dialog__button--danger':
                     confirmConfig.danger,
                 }"
-                :disabled="
-                  submitting
-                "
                 @click="
                   handleConfirmAction
                 "
               >
                 {{
-                  submitting
-                    ? '處理中...'
-                    : confirmConfig.confirmText
+                  confirmConfig.confirmText
                 }}
               </button>
             </div>
@@ -562,17 +420,9 @@ onBeforeUnmount(
       </Transition>
     </Teleport>
 
-    <!-- ======================================================
-         Toast
-         ====================================================== -->
-
-    <Transition
-      name="toast"
-    >
+    <Transition name="toast">
       <div
-        v-if="
-          showMessage
-        "
+        v-if="showMessage"
         class="toast"
       >
         {{ message }}
@@ -584,10 +434,7 @@ onBeforeUnmount(
 <style scoped>
 .home {
   min-height: 100vh;
-  padding:
-    24px
-    16px
-    50px;
+  padding: 24px 16px 50px;
   background: #f7f7f7;
 }
 
@@ -600,23 +447,14 @@ onBeforeUnmount(
   margin: 0 auto;
 }
 
-/* ============================================================
-   Header
-   ============================================================ */
-
 .home__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
   padding: 6px 4px;
 }
 
-.home__header > div:first-child {
-  min-width: 0;
-}
-
-.home__header > div:first-child > span {
+.home__header span {
   color: #999999;
   font-size: 13px;
   letter-spacing: 1px;
@@ -624,159 +462,21 @@ onBeforeUnmount(
 
 .home__header h1 {
   margin: 3px 0 0;
-  color: #222222;
   font-size: 25px;
 }
 
-/* ============================================================
-   LINE User
-   ============================================================ */
-
-.user {
+.avatar {
   display: flex;
-  flex-shrink: 0;
   align-items: center;
-  gap: 10px;
-}
-
-.user__avatar {
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  object-fit: cover;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
   background: #ffffff;
   border-radius: 50%;
   box-shadow:
-    0 4px 14px
-    rgb(0 0 0 / 8%);
-}
-
-.user__avatar--placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 19px;
-}
-
-.user__info {
-  display: flex;
-  min-width: 0;
-  max-width: 110px;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.user__info strong {
-  overflow: hidden;
-  color: #333333;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.user__info span {
-  color: #999999;
-  font-size: 11px;
-}
-
-/* ============================================================
-   Loading
-   ============================================================ */
-
-.loading-card {
-  display: flex;
-  min-height: 180px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 32px;
-  background: #ffffff;
-  border-radius: 24px;
-  color: #999999;
-  font-size: 14px;
-  box-shadow:
-    0 8px 30px
+    0 5px 16px
     rgb(0 0 0 / 5%);
 }
-
-.loading-spinner {
-  width: 30px;
-  height: 30px;
-  border:
-    3px solid
-    #eeeeee;
-  border-top-color:
-    #333333;
-  border-radius: 50%;
-  animation:
-    spin
-    0.8s
-    linear
-    infinite;
-}
-
-@keyframes spin {
-  to {
-    transform:
-      rotate(360deg);
-  }
-}
-
-/* ============================================================
-   未授權
-   ============================================================ */
-
-.auth-card {
-  padding:
-    36px
-    24px;
-  background: #ffffff;
-  border-radius: 24px;
-  box-shadow:
-    0 8px 30px
-    rgb(0 0 0 / 5%);
-  text-align: center;
-}
-
-.auth-card__icon {
-  display: flex;
-  width: 58px;
-  height: 58px;
-  align-items: center;
-  justify-content: center;
-  margin:
-    0 auto
-    18px;
-  background: #f5f5f5;
-  border-radius: 18px;
-  font-size: 25px;
-}
-
-.auth-card h2 {
-  margin: 0;
-  color: #222222;
-  font-size: 21px;
-}
-
-.auth-card p {
-  margin:
-    12px
-    0
-    0;
-  color: #666666;
-  font-size: 14px;
-  line-height: 1.7;
-}
-
-.auth-card__hint {
-  color: #999999 !important;
-  font-size: 12px !important;
-}
-
-/* ============================================================
-   Dialog
-   ============================================================ */
 
 .dialog-mask {
   position: fixed;
@@ -814,8 +514,7 @@ onBeforeUnmount(
   width: 54px;
   height: 54px;
   margin:
-    0 auto
-    16px;
+    0 auto 16px;
   background: #f4f4f4;
   border-radius: 50%;
   color: #444444;
@@ -835,10 +534,7 @@ onBeforeUnmount(
 }
 
 .dialog__message {
-  margin:
-    12px
-    0
-    0;
+  margin: 12px 0 0;
   color: #666666;
   font-size: 14px;
   line-height: 1.7;
@@ -847,8 +543,7 @@ onBeforeUnmount(
 .dialog__actions {
   display: grid;
   grid-template-columns:
-    1fr
-    1fr;
+    1fr 1fr;
   gap: 10px;
   margin-top: 24px;
 }
@@ -856,8 +551,7 @@ onBeforeUnmount(
 .dialog__button {
   min-height: 46px;
   padding:
-    10px
-    16px;
+    10px 16px;
   border: 0;
   border-radius: 14px;
   font-size: 14px;
@@ -870,17 +564,9 @@ onBeforeUnmount(
     0.15s ease;
 }
 
-.dialog__button:not(
-  :disabled
-):active {
+.dialog__button:active {
   transform:
     scale(0.97);
-}
-
-.dialog__button:disabled {
-  cursor:
-    not-allowed;
-  opacity: 0.55;
 }
 
 .dialog__button--cancel {
@@ -898,27 +584,17 @@ onBeforeUnmount(
   color: #ffffff;
 }
 
-/* ============================================================
-   Toast
-   ============================================================ */
-
 .toast {
   position: fixed;
   bottom: 28px;
   left: 50%;
   z-index: 1100;
   max-width:
-    calc(
-      100vw - 32px
-    );
+    calc(100vw - 32px);
   padding:
-    11px
-    20px;
+    11px 20px;
   background:
-    rgb(
-      20 20 20 /
-      92%
-    );
+    rgb(20 20 20 / 92%);
   border-radius: 999px;
   color: #ffffff;
   font-size: 14px;
@@ -928,15 +604,10 @@ onBeforeUnmount(
     translateX(-50%);
 }
 
-/* ============================================================
-   Animation
-   ============================================================ */
-
 .dialog-enter-active,
 .dialog-leave-active {
   transition:
-    opacity
-    0.2s ease;
+    opacity 0.2s ease;
 }
 
 .dialog-enter-active
@@ -983,10 +654,6 @@ onBeforeUnmount(
     );
 }
 
-/* ============================================================
-   Mobile
-   ============================================================ */
-
 @media (
   max-width: 480px
 ) {
@@ -995,15 +662,6 @@ onBeforeUnmount(
       18px
       14px
       40px;
-  }
-
-  .home__header {
-    align-items:
-      flex-start;
-  }
-
-  .user__info {
-    display: none;
   }
 
   .dialog {
