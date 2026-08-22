@@ -47,12 +47,28 @@ export default defineEventHandler(
     const runtimeConfig =
       useRuntimeConfig()
 
+    // LIFF ID 的格式是 <Channel ID>-<LIFF app ID>。
+    // Channel ID 本身不是密鑰；此備援可避免部署環境只設定
+    // NUXT_PUBLIC_TEACHER_LIFF_ID 時，登入驗證直接失敗。
+    const liffChannelId =
+      String(
+        runtimeConfig
+          .public
+          ?.teacherLiffId ||
+        ''
+      )
+        .trim()
+        .split(
+          '-'
+        )[0]
+
     const channelId =
       String(
         runtimeConfig
           .teacherLineChannelId ||
         process.env
           .NUXT_TEACHER_LINE_CHANNEL_ID ||
+        liffChannelId ||
         ''
       ).trim()
 
