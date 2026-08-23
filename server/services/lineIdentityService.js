@@ -16,6 +16,12 @@ const ROLE_TEACHER =
 const ROLE_STUDENT =
   'STUDENT'
 
+const STATUS_ACTIVE =
+  'ACTIVE'
+
+const LINE_ISSUER =
+  'https://access.line.me'
+
 const VALID_ROLES = [
   ROLE_TEACHER,
   ROLE_STUDENT,
@@ -29,8 +35,22 @@ const normalizeText = (
   value,
 ) => {
   return String(
-    value || '',
+    value ?? '',
   ).trim()
+}
+
+const normalizeNullableText = (
+  value,
+) => {
+  const normalized =
+    normalizeText(
+      value,
+    )
+
+  return (
+    normalized ||
+    null
+  )
 }
 
 const normalizeRole = (
@@ -39,7 +59,8 @@ const normalizeRole = (
   const normalized =
     normalizeText(
       value,
-    ).toUpperCase()
+    )
+      .toUpperCase()
 
   if (
     !VALID_ROLES.includes(
@@ -48,8 +69,9 @@ const normalizeRole = (
   ) {
     throw createError({
       statusCode: 400,
+
       statusMessage:
-        'LINE 登入角色不正確',
+        `不支援的 LINE 登入角色：${value}`,
     })
   }
 
@@ -80,6 +102,7 @@ export const verifyLineIdToken =
     ) {
       throw createError({
         statusCode: 400,
+
         statusMessage:
           '缺少 LINE ID Token',
       })
@@ -90,6 +113,7 @@ export const verifyLineIdToken =
     ) {
       throw createError({
         statusCode: 500,
+
         statusMessage:
           '伺服器尚未設定 LINE Channel ID',
       })
@@ -115,7 +139,8 @@ export const verifyLineIdToken =
         await fetch(
           'https://api.line.me/oauth2/v2.1/verify',
           {
-            method: 'POST',
+            method:
+              'POST',
 
             headers: {
               'Content-Type':
@@ -129,14 +154,15 @@ export const verifyLineIdToken =
     }
     catch (error) {
       console.error(
-        'LINE Token 驗證連線失敗：',
+        '無法連線 LINE ID Token 驗證服務：',
         error,
       )
 
       throw createError({
         statusCode: 502,
+
         statusMessage:
-          '無法連線至 LINE 驗證服務',
+          '無法連線 LINE 驗證服務',
       })
     }
 
@@ -148,12 +174,13 @@ export const verifyLineIdToken =
     }
     catch (error) {
       console.error(
-        'LINE 驗證回應解析失敗：',
+        'LINE Token 驗證回應解析失敗：',
         error,
       )
 
       throw createError({
         statusCode: 502,
+
         statusMessage:
           'LINE 驗證服務回應格式錯誤',
       })
@@ -169,9 +196,11 @@ export const verifyLineIdToken =
 
       throw createError({
         statusCode: 401,
+
         statusMessage:
-          result?.error_description ||
-          'LINE 登入驗證失敗',
+          result
+            ?.error_description ||
+          'LINE ID Token 驗證失敗',
       })
     }
 
@@ -185,7 +214,7 @@ export const verifyLineIdToken =
       normalizedChannelId
     ) {
       console.error(
-        'LINE Channel ID 不一致：',
+        'LINE Token Channel 不一致：',
         {
           expected:
             normalizedChannelId,
@@ -197,6 +226,7 @@ export const verifyLineIdToken =
 
       throw createError({
         statusCode: 401,
+
         statusMessage:
           'LINE Login Channel 不符合',
       })
@@ -212,8 +242,9 @@ export const verifyLineIdToken =
     ) {
       throw createError({
         statusCode: 401,
+
         statusMessage:
-          'LINE Token 缺少使用者 ID',
+          'LINE Token 缺少使用者識別碼',
       })
     }
 
@@ -223,36 +254,39 @@ export const verifyLineIdToken =
       channelId:
         normalizedChannelId,
 
-      displayName:
-        normalizeText(
-          result.name,
+      issuer:
+        normalizeNullableText(
+          result.iss,
         ) ||
-        null,
+        LINE_ISSUER,
+
+      displayName:
+        normalizeNullableText(
+          result.name,
+        ),
 
       pictureUrl:
-        normalizeText(
+        normalizeNullableText(
           result.picture,
-        ) ||
-        null,
+        ),
 
       email:
-        normalizeText(
+        normalizeNullableText(
           result.email,
-        ) ||
-        null,
+        ),
     }
   }
 
 // ============================================================
-// Find Identity
+// Find Exact LINE Identity
 //
-// 重要：
+// 真實 Schema：
 //
-// 不可以：
-// FROM app_users user
+// app_user_line_identities.login_role
 //
-// 改用：
-// FROM app_users app_user
+// 不是：
+//
+// app_user_line_identities.role
 // ============================================================
 
 const findIdentity =
@@ -270,12 +304,26 @@ const findIdentity =
 
           line_identity.app_user_id,
 
-          line_identity.line_user_id,
+          line_identity.line_user_id
+            AS identity_line_user_id,
 
-          line_identity.channel_id,
+          line_identity.login_role
+            AS identity_login_role,
 
-          line_identity.role
-            AS identity_role,
+          line_identity.channel_id
+            AS identity_channel_id,
+
+          line_identity.issuer
+            AS identity_issuer,
+
+          line_identity.display_name
+            AS identity_display_name,
+
+          line_identity.picture_url
+            AS identity_picture_url,
+
+          line_identity.last_login_at
+            AS identity_last_login_at,
 
           line_identity.created_at
             AS identity_created_at,
@@ -286,13 +334,23 @@ const findIdentity =
           app_user.id
             AS user_id,
 
+          app_user.line_user_id
+            AS user_line_user_id,
+
+          app_user.display_name
+            AS user_display_name,
+
+          app_user.picture_url
+            AS user_picture_url,
+
           app_user.role
             AS user_role,
 
-          app_user.display_name,
-
           app_user.status
             AS user_status,
+
+          app_user.last_login_at
+            AS user_last_login_at,
 
           app_user.created_at
             AS user_created_at,
@@ -308,7 +366,8 @@ const findIdentity =
           app_users
             AS app_user
 
-          ON app_user.id =
+          ON
+            app_user.id =
             line_identity.app_user_id
 
         WHERE
@@ -317,11 +376,11 @@ const findIdentity =
 
           AND
             line_identity.channel_id =
-              ${channelId}
+            ${channelId}
 
           AND
-            line_identity.role =
-              ${expectedRole}
+            line_identity.login_role =
+            ${expectedRole}
 
         LIMIT 1
       `
@@ -333,10 +392,10 @@ const findIdentity =
   }
 
 // ============================================================
-// Find Any Identity
+// Find Identity By LINE + Channel
 // ============================================================
 
-const findAnyIdentity =
+const findIdentityByChannel =
   async ({
     sql,
     lineUserId,
@@ -351,9 +410,17 @@ const findAnyIdentity =
 
           line_identity.line_user_id,
 
+          line_identity.login_role,
+
           line_identity.channel_id,
 
-          line_identity.role,
+          line_identity.issuer,
+
+          line_identity.display_name,
+
+          line_identity.picture_url,
+
+          line_identity.last_login_at,
 
           line_identity.created_at,
 
@@ -369,7 +436,7 @@ const findAnyIdentity =
 
           AND
             line_identity.channel_id =
-              ${channelId}
+            ${channelId}
 
         LIMIT 1
       `
@@ -381,10 +448,60 @@ const findAnyIdentity =
   }
 
 // ============================================================
-// Find Teacher
+// Find App User By LINE User ID
 // ============================================================
 
-const getTeachers =
+const findAppUserByLineUserId =
+  async ({
+    sql,
+    lineUserId,
+  }) => {
+    const rows =
+      await sql`
+        SELECT
+          app_user.id,
+
+          app_user.line_user_id,
+
+          app_user.display_name,
+
+          app_user.picture_url,
+
+          app_user.role,
+
+          app_user.status,
+
+          app_user.last_login_at,
+
+          app_user.created_at,
+
+          app_user.updated_at
+
+        FROM
+          app_users
+            AS app_user
+
+        WHERE
+          app_user.line_user_id =
+            ${lineUserId}
+
+        ORDER BY
+          app_user.created_at ASC
+
+        LIMIT 1
+      `
+
+    return (
+      rows[0] ||
+      null
+    )
+  }
+
+// ============================================================
+// Find Teachers
+// ============================================================
+
+const findTeachers =
   async (
     sql,
   ) => {
@@ -392,11 +509,17 @@ const getTeachers =
       SELECT
         app_user.id,
 
-        app_user.role,
+        app_user.line_user_id,
 
         app_user.display_name,
 
+        app_user.picture_url,
+
+        app_user.role,
+
         app_user.status,
+
+        app_user.last_login_at,
 
         app_user.created_at,
 
@@ -433,9 +556,17 @@ const findTeacherIdentity =
 
           line_identity.line_user_id,
 
+          line_identity.login_role,
+
           line_identity.channel_id,
 
-          line_identity.role,
+          line_identity.issuer,
+
+          line_identity.display_name,
+
+          line_identity.picture_url,
+
+          line_identity.last_login_at,
 
           line_identity.created_at,
 
@@ -450,8 +581,11 @@ const findTeacherIdentity =
             ${teacherId}
 
           AND
-            line_identity.role =
-              'TEACHER'
+            line_identity.login_role =
+            'TEACHER'
+
+        ORDER BY
+          line_identity.created_at ASC
 
         LIMIT 1
       `
@@ -469,8 +603,8 @@ const findTeacherIdentity =
 const createAppUser =
   async ({
     sql,
+    lineProfile,
     role,
-    displayName,
   }) => {
     const userId =
       randomUUID()
@@ -481,11 +615,17 @@ const createAppUser =
           app_users (
             id,
 
-            role,
+            line_user_id,
 
             display_name,
 
+            picture_url,
+
+            role,
+
             status,
+
+            last_login_at,
 
             created_at,
 
@@ -495,11 +635,23 @@ const createAppUser =
         VALUES (
           ${userId},
 
+          ${lineProfile.lineUserId},
+
+          ${
+            lineProfile.displayName ||
+            null
+          },
+
+          ${
+            lineProfile.pictureUrl ||
+            null
+          },
+
           ${role},
 
-          ${displayName || null},
+          ${STATUS_ACTIVE},
 
-          'ACTIVE',
+          NOW(),
 
           NOW(),
 
@@ -508,10 +660,21 @@ const createAppUser =
 
         RETURNING
           id,
-          role,
+
+          line_user_id,
+
           display_name,
+
+          picture_url,
+
+          role,
+
           status,
+
+          last_login_at,
+
           created_at,
+
           updated_at
       `
 
@@ -529,8 +692,7 @@ const createIdentity =
   async ({
     sql,
     appUserId,
-    lineUserId,
-    channelId,
+    lineProfile,
     role,
   }) => {
     const identityId =
@@ -546,9 +708,17 @@ const createIdentity =
 
             line_user_id,
 
+            login_role,
+
             channel_id,
 
-            role,
+            issuer,
+
+            display_name,
+
+            picture_url,
+
+            last_login_at,
 
             created_at,
 
@@ -560,11 +730,28 @@ const createIdentity =
 
           ${appUserId},
 
-          ${lineUserId},
-
-          ${channelId},
+          ${lineProfile.lineUserId},
 
           ${role},
+
+          ${lineProfile.channelId},
+
+          ${
+            lineProfile.issuer ||
+            LINE_ISSUER
+          },
+
+          ${
+            lineProfile.displayName ||
+            null
+          },
+
+          ${
+            lineProfile.pictureUrl ||
+            null
+          },
+
+          NOW(),
 
           NOW(),
 
@@ -573,11 +760,25 @@ const createIdentity =
 
         RETURNING
           id,
+
           app_user_id,
+
           line_user_id,
+
+          login_role,
+
           channel_id,
-          role,
+
+          issuer,
+
+          display_name,
+
+          picture_url,
+
+          last_login_at,
+
           created_at,
+
           updated_at
       `
 
@@ -588,10 +789,162 @@ const createIdentity =
   }
 
 // ============================================================
-// Map Existing Result
+// Update Login Metadata
 // ============================================================
 
-const mapIdentityResult =
+const updateLoginMetadata =
+  async ({
+    sql,
+    appUserId,
+    identityId,
+    lineProfile,
+  }) => {
+    const userRows =
+      await sql`
+        UPDATE
+          app_users
+
+        SET
+          line_user_id =
+            ${lineProfile.lineUserId},
+
+          display_name =
+            COALESCE(
+              ${
+                lineProfile.displayName ||
+                null
+              },
+              display_name
+            ),
+
+          picture_url =
+            COALESCE(
+              ${
+                lineProfile.pictureUrl ||
+                null
+              },
+              picture_url
+            ),
+
+          last_login_at =
+            NOW(),
+
+          updated_at =
+            NOW()
+
+        WHERE
+          id =
+            ${appUserId}
+
+        RETURNING
+          id,
+
+          line_user_id,
+
+          display_name,
+
+          picture_url,
+
+          role,
+
+          status,
+
+          last_login_at,
+
+          created_at,
+
+          updated_at
+      `
+
+    let identity =
+      null
+
+    if (
+      identityId
+    ) {
+      const identityRows =
+        await sql`
+          UPDATE
+            app_user_line_identities
+
+          SET
+            issuer =
+              ${
+                lineProfile.issuer ||
+                LINE_ISSUER
+              },
+
+            display_name =
+              COALESCE(
+                ${
+                  lineProfile.displayName ||
+                  null
+                },
+                display_name
+              ),
+
+            picture_url =
+              COALESCE(
+                ${
+                  lineProfile.pictureUrl ||
+                  null
+                },
+                picture_url
+              ),
+
+            last_login_at =
+              NOW(),
+
+            updated_at =
+              NOW()
+
+          WHERE
+            id =
+              ${identityId}
+
+          RETURNING
+            id,
+
+            app_user_id,
+
+            line_user_id,
+
+            login_role,
+
+            channel_id,
+
+            issuer,
+
+            display_name,
+
+            picture_url,
+
+            last_login_at,
+
+            created_at,
+
+            updated_at
+        `
+
+      identity =
+        identityRows[0] ||
+        null
+    }
+
+    return {
+      user:
+        userRows[0] ||
+        null,
+
+      identity,
+    }
+  }
+
+// ============================================================
+// Map Joined Identity
+// ============================================================
+
+const mapJoinedIdentity =
   (
     row,
   ) => {
@@ -600,14 +953,23 @@ const mapIdentityResult =
         id:
           row.user_id,
 
+        line_user_id:
+          row.user_line_user_id,
+
+        display_name:
+          row.user_display_name,
+
+        picture_url:
+          row.user_picture_url,
+
         role:
           row.user_role,
 
-        display_name:
-          row.display_name,
-
         status:
           row.user_status,
+
+        last_login_at:
+          row.user_last_login_at,
 
         created_at:
           row.user_created_at,
@@ -624,13 +986,25 @@ const mapIdentityResult =
           row.app_user_id,
 
         line_user_id:
-          row.line_user_id,
+          row.identity_line_user_id,
+
+        login_role:
+          row.identity_login_role,
 
         channel_id:
-          row.channel_id,
+          row.identity_channel_id,
 
-        role:
-          row.identity_role,
+        issuer:
+          row.identity_issuer,
+
+        display_name:
+          row.identity_display_name,
+
+        picture_url:
+          row.identity_picture_url,
+
+        last_login_at:
+          row.identity_last_login_at,
 
         created_at:
           row.identity_created_at,
@@ -642,23 +1016,24 @@ const mapIdentityResult =
   }
 
 // ============================================================
-// Resolve Existing
+// Resolve Existing Identity
 // ============================================================
 
-const resolveExisting =
+const resolveExistingIdentity =
   async ({
     sql,
-    lineUserId,
-    channelId,
+    lineProfile,
     expectedRole,
   }) => {
     const row =
       await findIdentity({
         sql,
 
-        lineUserId,
+        lineUserId:
+          lineProfile.lineUserId,
 
-        channelId,
+        channelId:
+          lineProfile.channelId,
 
         expectedRole,
       })
@@ -669,145 +1044,183 @@ const resolveExisting =
       return null
     }
 
+    // ========================================================
+    // Identity Role
+    // ========================================================
+
+    if (
+      row.identity_login_role !==
+      expectedRole
+    ) {
+      throw createError({
+        statusCode: 403,
+
+        statusMessage:
+          'LINE 登入角色與綁定角色不一致',
+      })
+    }
+
+    // ========================================================
+    // App User Role
+    // ========================================================
+
     if (
       row.user_role !==
       expectedRole
     ) {
       throw createError({
         statusCode: 403,
+
         statusMessage:
           'LINE 身分與系統角色不一致',
       })
     }
 
+    // ========================================================
+    // Status
+    // ========================================================
+
     if (
-      row.identity_role !==
+      row.user_status !==
+      STATUS_ACTIVE
+    ) {
+      throw createError({
+        statusCode: 403,
+
+        statusMessage:
+          '此帳號目前不是啟用狀態',
+      })
+    }
+
+    const mapped =
+      mapJoinedIdentity(
+        row,
+      )
+
+    // ========================================================
+    // Update Last Login
+    // ========================================================
+
+    const updated =
+      await updateLoginMetadata({
+        sql,
+
+        appUserId:
+          mapped.user.id,
+
+        identityId:
+          mapped.identity.id,
+
+        lineProfile,
+      })
+
+    return {
+      user:
+        updated.user ||
+        mapped.user,
+
+      identity:
+        updated.identity ||
+        mapped.identity,
+
+      bootstrapped:
+        false,
+    }
+  }
+
+// ============================================================
+// Ensure No Channel Role Conflict
+// ============================================================
+
+const ensureNoChannelConflict =
+  async ({
+    sql,
+    lineProfile,
+    expectedRole,
+  }) => {
+    const identity =
+      await findIdentityByChannel({
+        sql,
+
+        lineUserId:
+          lineProfile.lineUserId,
+
+        channelId:
+          lineProfile.channelId,
+      })
+
+    if (
+      !identity
+    ) {
+      return
+    }
+
+    if (
+      identity.login_role !==
       expectedRole
     ) {
       throw createError({
         statusCode: 403,
+
         statusMessage:
-          'LINE 綁定角色不一致',
+          '這個 LINE 身分在此 Login Channel 已綁定其他角色',
+      })
+    }
+  }
+
+// ============================================================
+// Ensure App User Role
+// ============================================================
+
+const ensureAppUserRole =
+  ({
+    appUser,
+    expectedRole,
+  }) => {
+    if (
+      !appUser
+    ) {
+      return
+    }
+
+    if (
+      appUser.role !==
+      expectedRole
+    ) {
+      throw createError({
+        statusCode: 403,
+
+        statusMessage:
+          `這個 LINE 帳號已綁定 ${
+            appUser.role ||
+            '其他'
+          } 身分，無法以 ${expectedRole} 登入`,
       })
     }
 
     if (
-      row.user_status !==
-      'ACTIVE'
+      appUser.status !==
+      STATUS_ACTIVE
     ) {
       throw createError({
         statusCode: 403,
+
         statusMessage:
-          '此帳號目前已停用',
+          '此帳號目前不是啟用狀態',
       })
     }
-
-    return mapIdentityResult(
-      row,
-    )
   }
 
 // ============================================================
 // Bootstrap Teacher
 //
-// 測試環境：
+// 單一老師模式：
 //
-// 如果 app_users 完全沒有 TEACHER，
-// 第一次成功從 Teacher LIFF 登入的人
-// 自動建立唯一 TEACHER。
-// ============================================================
-
-const bootstrapTeacher =
-  async ({
-    sql,
-    lineProfile,
-  }) => {
-    const teachers =
-      await getTeachers(
-        sql,
-      )
-
-    // ========================================================
-    // DB 異常：不應該超過一個老師
-    // ========================================================
-
-    if (
-      teachers.length >
-      1
-    ) {
-      throw createError({
-        statusCode: 409,
-        statusMessage:
-          '系統存在多個老師帳號，請先整理資料庫',
-      })
-    }
-
-    // ========================================================
-    // 已有老師
-    // ========================================================
-
-    if (
-      teachers.length ===
-      1
-    ) {
-      const teacher =
-        teachers[0]
-
-      if (
-        teacher.status !==
-        'ACTIVE'
-      ) {
-        throw createError({
-          statusCode: 403,
-          statusMessage:
-            '老師帳號目前已停用',
-        })
-      }
-
-      return {
-        teacher,
-
-        created:
-          false,
-      }
-    }
-
-    // ========================================================
-    // 沒有老師 → 建立第一個老師
-    // ========================================================
-
-    const teacher =
-      await createAppUser({
-        sql,
-
-        role:
-          ROLE_TEACHER,
-
-        displayName:
-          lineProfile.displayName ||
-          '老師',
-      })
-
-    if (
-      !teacher
-    ) {
-      throw createError({
-        statusCode: 500,
-        statusMessage:
-          '無法建立老師帳號',
-      })
-    }
-
-    return {
-      teacher,
-
-      created:
-        true,
-    }
-  }
-
-// ============================================================
-// Resolve Teacher
+// DB 沒有 TEACHER：
+// 第一個成功 Teacher LIFF 登入的人建立為 TEACHER。
+//
+// DB 已有 TEACHER：
+// 只能原本那個 LINE 身分使用。
 // ============================================================
 
 const resolveTeacher =
@@ -816,18 +1229,14 @@ const resolveTeacher =
     lineProfile,
   }) => {
     // ========================================================
-    // 1. Existing exact identity
+    // 1. Exact Identity
     // ========================================================
 
     const existing =
-      await resolveExisting({
+      await resolveExistingIdentity({
         sql,
 
-        lineUserId:
-          lineProfile.lineUserId,
-
-        channelId:
-          lineProfile.channelId,
+        lineProfile,
 
         expectedRole:
           ROLE_TEACHER,
@@ -836,56 +1245,149 @@ const resolveTeacher =
     if (
       existing
     ) {
-      return {
-        ...existing,
-
-        bootstrapped:
-          false,
-      }
+      return existing
     }
 
     // ========================================================
-    // 2. Same LINE + Channel bound as another role
+    // 2. Channel Conflict
     // ========================================================
 
-    const conflicting =
-      await findAnyIdentity({
+    await ensureNoChannelConflict({
+      sql,
+
+      lineProfile,
+
+      expectedRole:
+        ROLE_TEACHER,
+    })
+
+    // ========================================================
+    // 3. Existing App User For This LINE
+    // ========================================================
+
+    const lineAppUser =
+      await findAppUserByLineUserId({
         sql,
 
         lineUserId:
           lineProfile.lineUserId,
-
-        channelId:
-          lineProfile.channelId,
       })
 
     if (
-      conflicting &&
-      conflicting.role !==
-        ROLE_TEACHER
+      lineAppUser
     ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          '這個 LINE 身分已綁定其他角色',
+      ensureAppUserRole({
+        appUser:
+          lineAppUser,
+
+        expectedRole:
+          ROLE_TEACHER,
       })
     }
 
     // ========================================================
-    // 3. Get/Create unique Teacher
+    // 4. Current Teachers
     // ========================================================
 
-    const {
-      teacher,
-      created,
-    } =
-      await bootstrapTeacher({
+    const teachers =
+      await findTeachers(
         sql,
-        lineProfile,
+      )
+
+    if (
+      teachers.length >
+      1
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '系統存在超過一個老師帳號，請先整理資料庫',
+      })
+    }
+
+    let teacher =
+      null
+
+    let bootstrapped =
+      false
+
+    // ========================================================
+    // 5. No Teacher
+    // ========================================================
+
+    if (
+      teachers.length ===
+      0
+    ) {
+      if (
+        lineAppUser
+      ) {
+        teacher =
+          lineAppUser
+      }
+      else {
+        teacher =
+          await createAppUser({
+            sql,
+
+            lineProfile,
+
+            role:
+              ROLE_TEACHER,
+          })
+
+        bootstrapped =
+          true
+      }
+    }
+    else {
+      // ======================================================
+      // Existing Single Teacher
+      // ======================================================
+
+      teacher =
+        teachers[0]
+
+      ensureAppUserRole({
+        appUser:
+          teacher,
+
+        expectedRole:
+          ROLE_TEACHER,
       })
 
+      // ======================================================
+      // Existing teacher has different LINE user
+      // ======================================================
+
+      if (
+        teacher.line_user_id &&
+        teacher.line_user_id !==
+        lineProfile.lineUserId
+      ) {
+        throw createError({
+          statusCode: 403,
+
+          statusMessage:
+            '老師帳號已綁定其他 LINE 帳號',
+        })
+      }
+    }
+
+    if (
+      !teacher
+    ) {
+      throw createError({
+        statusCode: 500,
+
+        statusMessage:
+          '無法建立或取得老師帳號',
+      })
+    }
+
     // ========================================================
-    // 4. Teacher already bound to another LINE
+    // 6. Existing Teacher Identity
     // ========================================================
 
     const teacherIdentity =
@@ -905,8 +1407,9 @@ const resolveTeacher =
       ) {
         throw createError({
           statusCode: 403,
+
           statusMessage:
-            '老師帳號已綁定其他 LINE 帳號',
+            '老師帳號已綁定其他 LINE 身分',
         })
       }
 
@@ -916,107 +1419,101 @@ const resolveTeacher =
       ) {
         throw createError({
           statusCode: 403,
+
           statusMessage:
-            '老師帳號已綁定不同的 LINE Channel',
+            '老師帳號已綁定不同的 LINE Login Channel',
         })
       }
 
-      return {
-        user:
-          teacher,
+      if (
+        teacherIdentity.login_role !==
+        ROLE_TEACHER
+      ) {
+        throw createError({
+          statusCode: 403,
 
-        identity:
-          teacherIdentity,
-
-        bootstrapped:
-          created,
+          statusMessage:
+            '老師 LINE 綁定角色不正確',
+        })
       }
-    }
 
-    // ========================================================
-    // 5. Create Teacher Identity
-    // ========================================================
-
-    let identity
-
-    try {
-      identity =
-        await createIdentity({
+      const updated =
+        await updateLoginMetadata({
           sql,
 
           appUserId:
             teacher.id,
 
-          lineUserId:
-            lineProfile.lineUserId,
+          identityId:
+            teacherIdentity.id,
 
-          channelId:
-            lineProfile.channelId,
-
-          role:
-            ROLE_TEACHER,
+          lineProfile,
         })
-    }
-    catch (error) {
-      // ======================================================
-      // 避免同時登入造成 unique race
-      // ======================================================
-
-      if (
-        error?.code !==
-        '23505'
-      ) {
-        throw error
-      }
-
-      const reread =
-        await resolveExisting({
-          sql,
-
-          lineUserId:
-            lineProfile.lineUserId,
-
-          channelId:
-            lineProfile.channelId,
-
-          expectedRole:
-            ROLE_TEACHER,
-        })
-
-      if (
-        !reread
-      ) {
-        throw error
-      }
 
       return {
-        ...reread,
+        user:
+          updated.user ||
+          teacher,
 
-        bootstrapped:
-          created,
+        identity:
+          updated.identity ||
+          teacherIdentity,
+
+        bootstrapped,
       }
     }
+
+    // ========================================================
+    // 7. Create Teacher Identity
+    // ========================================================
+
+    const identity =
+      await createIdentity({
+        sql,
+
+        appUserId:
+          teacher.id,
+
+        lineProfile,
+
+        role:
+          ROLE_TEACHER,
+      })
+
+    const updated =
+      await updateLoginMetadata({
+        sql,
+
+        appUserId:
+          teacher.id,
+
+        identityId:
+          identity.id,
+
+        lineProfile,
+      })
 
     return {
       user:
+        updated.user ||
         teacher,
 
-      identity,
+      identity:
+        updated.identity ||
+        identity,
 
-      bootstrapped:
-        created,
+      bootstrapped,
     }
   }
 
 // ============================================================
 // Resolve Student
 //
-// STUDENT 與老師不同：
+// Student 與 Teacher 不同：
 //
-// - 不會建立 TEACHER
-// - 第一次 Student LIFF 登入可以建立 STUDENT app_user
-// - 但 students.user_id 的真正學生資料綁定
-//   仍然交給 /student/link 流程
+// - Student LIFF 可以建立 STUDENT app_users
+// - 但是這只代表「LINE 登入帳號」
+// - 真正 students.user_id 綁定仍由 /student/link 處理
 // ============================================================
 
 const resolveStudent =
@@ -1025,18 +1522,14 @@ const resolveStudent =
     lineProfile,
   }) => {
     // ========================================================
-    // Existing
+    // 1. Exact Identity
     // ========================================================
 
     const existing =
-      await resolveExisting({
+      await resolveExistingIdentity({
         sql,
 
-        lineUserId:
-          lineProfile.lineUserId,
-
-        channelId:
-          lineProfile.channelId,
+        lineProfile,
 
         expectedRole:
           ROLE_STUDENT,
@@ -1045,132 +1538,110 @@ const resolveStudent =
     if (
       existing
     ) {
-      return {
-        ...existing,
-
-        bootstrapped:
-          false,
-      }
+      return existing
     }
 
     // ========================================================
-    // Conflict
+    // 2. Channel Conflict
     // ========================================================
 
-    const conflicting =
-      await findAnyIdentity({
+    await ensureNoChannelConflict({
+      sql,
+
+      lineProfile,
+
+      expectedRole:
+        ROLE_STUDENT,
+    })
+
+    // ========================================================
+    // 3. Existing App User by LINE user id
+    // ========================================================
+
+    let studentUser =
+      await findAppUserByLineUserId({
         sql,
 
         lineUserId:
           lineProfile.lineUserId,
-
-        channelId:
-          lineProfile.channelId,
       })
 
     if (
-      conflicting &&
-      conflicting.role !==
-        ROLE_STUDENT
+      studentUser
     ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          '這個 LINE 身分已綁定其他角色',
+      ensureAppUserRole({
+        appUser:
+          studentUser,
+
+        expectedRole:
+          ROLE_STUDENT,
       })
     }
+    else {
+      // ======================================================
+      // 4. First Student LIFF Login
+      // ======================================================
 
-    // ========================================================
-    // Create STUDENT app_user
-    // ========================================================
+      studentUser =
+        await createAppUser({
+          sql,
 
-    const studentUser =
-      await createAppUser({
-        sql,
+          lineProfile,
 
-        role:
-          ROLE_STUDENT,
-
-        displayName:
-          lineProfile.displayName ||
-          '學生',
-      })
+          role:
+            ROLE_STUDENT,
+        })
+    }
 
     if (
       !studentUser
     ) {
       throw createError({
         statusCode: 500,
+
         statusMessage:
           '無法建立學生登入帳號',
       })
     }
 
     // ========================================================
-    // Create Identity
+    // 5. Create Student Identity
     // ========================================================
 
-    let identity
+    const identity =
+      await createIdentity({
+        sql,
 
-    try {
-      identity =
-        await createIdentity({
-          sql,
+        appUserId:
+          studentUser.id,
 
-          appUserId:
-            studentUser.id,
+        lineProfile,
 
-          lineUserId:
-            lineProfile.lineUserId,
+        role:
+          ROLE_STUDENT,
+      })
 
-          channelId:
-            lineProfile.channelId,
+    const updated =
+      await updateLoginMetadata({
+        sql,
 
-          role:
-            ROLE_STUDENT,
-        })
-    }
-    catch (error) {
-      if (
-        error?.code !==
-        '23505'
-      ) {
-        throw error
-      }
+        appUserId:
+          studentUser.id,
 
-      const reread =
-        await resolveExisting({
-          sql,
+        identityId:
+          identity.id,
 
-          lineUserId:
-            lineProfile.lineUserId,
-
-          channelId:
-            lineProfile.channelId,
-
-          expectedRole:
-            ROLE_STUDENT,
-        })
-
-      if (
-        !reread
-      ) {
-        throw error
-      }
-
-      return {
-        ...reread,
-
-        bootstrapped:
-          false,
-      }
-    }
+        lineProfile,
+      })
 
     return {
       user:
+        updated.user ||
         studentUser,
 
-      identity,
+      identity:
+        updated.identity ||
+        identity,
 
       bootstrapped:
         true,
@@ -1179,20 +1650,13 @@ const resolveStudent =
 
 // ============================================================
 // Resolve LINE Identity
-//
-// 這個 export 保留，因為你現在的 API stack 明確顯示：
-//
-// resolveLineIdentity()
 // ============================================================
 
 export const resolveLineIdentity =
   async ({
     idToken,
-
     channelId,
-
     expectedRole,
-
     role,
   }) => {
     const normalizedRole =
@@ -1220,6 +1684,7 @@ export const resolveLineIdentity =
       result =
         await resolveTeacher({
           sql,
+
           lineProfile,
         })
     }
@@ -1227,6 +1692,7 @@ export const resolveLineIdentity =
       result =
         await resolveStudent({
           sql,
+
           lineProfile,
         })
     }
@@ -1239,7 +1705,7 @@ export const resolveLineIdentity =
   }
 
 // ============================================================
-// Compatibility
+// Compatibility Exports
 // ============================================================
 
 export const authenticateTeacherLine =
