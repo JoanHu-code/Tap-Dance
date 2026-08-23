@@ -14,50 +14,106 @@ const SESSION_HOURS =
   12
 
 const hashToken = (
-  token
+  token,
 ) => {
   return createHash(
-    'sha256'
+    'sha256',
   )
-    .update(token)
-    .digest('hex')
+    .update(
+      token,
+    )
+    .digest(
+      'hex',
+    )
 }
+
+// ============================================================
+// Create Session
+// ============================================================
 
 export const createAuthSession =
   async (
     event,
-    userId
+    userId,
   ) => {
+    if (
+      !userId
+    ) {
+      throw createError({
+        statusCode: 500,
+
+        message:
+          '建立 Session 時缺少 userId',
+      })
+    }
+
     const sql =
       useDatabase()
 
     const token =
-      randomBytes(32)
-        .toString('hex')
-
-    const tokenHash =
-      hashToken(token)
-
-    await sql`
-      DELETE FROM auth_sessions
-      WHERE expires_at < NOW()
-    `
-
-    await sql`
-      INSERT INTO
-        auth_sessions (
-          user_id,
-          token_hash,
-          expires_at
+      randomBytes(
+        32,
+      )
+        .toString(
+          'hex',
         )
 
-      VALUES (
-        ${userId},
-        ${tokenHash},
-        NOW()
-          + INTERVAL '12 hours'
+    const tokenHash =
+      hashToken(
+        token,
       )
+
+    // ========================================================
+    // Remove Expired Sessions
+    // ========================================================
+
+    await sql`
+      DELETE FROM
+        auth_sessions
+
+      WHERE
+        expires_at <
+        NOW()
     `
+
+    // ========================================================
+    // Create Session
+    // ========================================================
+
+    const sessions =
+      await sql`
+        INSERT INTO
+          auth_sessions (
+            user_id,
+            token_hash,
+            expires_at
+          )
+
+        VALUES (
+          ${userId},
+          ${tokenHash},
+          NOW()
+            + INTERVAL '12 hours'
+        )
+
+        RETURNING
+          *
+      `
+
+    if (
+      !sessions.length
+    ) {
+      throw createError({
+        statusCode: 500,
+
+        message:
+          '無法建立登入 Session',
+      })
+    }
+
+    // ========================================================
+    // Cookie
+    // ========================================================
 
     setCookie(
       event,
@@ -70,81 +126,131 @@ export const createAuthSession =
           process.env.NODE_ENV ===
           'production',
 
-        sameSite: 'lax',
+        sameSite:
+          'lax',
 
-        path: '/',
+        path:
+          '/',
 
         maxAge:
           SESSION_HOURS *
           60 *
           60,
-      }
+      },
     )
+
+    return {
+      id:
+        sessions[0].id ||
+        null,
+
+      userId:
+        sessions[0].user_id,
+
+      expiresAt:
+        sessions[0].expires_at,
+    }
   }
 
+// ============================================================
+// Get Auth User
+// ============================================================
+
 export const getAuthUser =
-  async (event) => {
+  async (
+    event,
+  ) => {
     const sql =
       useDatabase()
 
     const token =
       getCookie(
         event,
-        COOKIE_NAME
+        COOKIE_NAME,
       )
 
-    if (!token) {
+    if (
+      !token
+    ) {
       return null
     }
 
     const tokenHash =
-      hashToken(token)
+      hashToken(
+        token,
+      )
 
     const users =
       await sql`
         SELECT
-          u.id,
-          u.line_user_id,
-          u.display_name,
-          u.picture_url,
-          u.role,
-          u.status
+          app_user.id,
 
-        FROM auth_sessions s
+          app_user.line_user_id,
 
-        INNER JOIN app_users u
-          ON u.id =
-            s.user_id
+          app_user.display_name,
+
+          app_user.picture_url,
+
+          app_user.role,
+
+          app_user.status
+
+        FROM
+          auth_sessions
+            AS auth_session
+
+        INNER JOIN
+          app_users
+            AS app_user
+
+          ON
+            app_user.id =
+            auth_session.user_id
 
         WHERE
-          s.token_hash =
+          auth_session.token_hash =
             ${tokenHash}
 
-          AND s.expires_at >
+          AND
+            auth_session.expires_at >
             NOW()
 
-          AND u.status =
+          AND
+            app_user.status =
             'ACTIVE'
 
         LIMIT 1
       `
 
-    if (!users.length) {
+    if (
+      !users.length
+    ) {
       return null
     }
 
     return users[0]
   }
 
-export const requireAuth =
-  async (event) => {
-    const user =
-      await getAuthUser(event)
+// ============================================================
+// Require Auth
+// ============================================================
 
-    if (!user) {
+export const requireAuth =
+  async (
+    event,
+  ) => {
+    const user =
+      await getAuthUser(
+        event,
+      )
+
+    if (
+      !user
+    ) {
       throw createError({
         statusCode: 401,
-        statusMessage:
+
+        message:
           '請先使用 LINE 登入',
       })
     }
@@ -152,26 +258,37 @@ export const requireAuth =
     return user
   }
 
+// ============================================================
+// Remove Session
+// ============================================================
+
 export const removeAuthSession =
-  async (event) => {
+  async (
+    event,
+  ) => {
     const sql =
       useDatabase()
 
     const token =
       getCookie(
         event,
-        COOKIE_NAME
+        COOKIE_NAME,
       )
 
-    if (token) {
+    if (
+      token
+    ) {
       const tokenHash =
-        hashToken(token)
+        hashToken(
+          token,
+        )
 
       await sql`
         DELETE FROM
           auth_sessions
 
-        WHERE token_hash =
+        WHERE
+          token_hash =
           ${tokenHash}
       `
     }
@@ -180,7 +297,8 @@ export const removeAuthSession =
       event,
       COOKIE_NAME,
       {
-        path: '/',
-      }
+        path:
+          '/',
+      },
     )
   }

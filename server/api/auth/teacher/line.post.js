@@ -3,30 +3,26 @@ import {
 } from '../../../utils/authSession.js'
 
 import {
-  useDatabase,
-} from '../../../utils/db.js'
-
-import {
   resolveLineIdentity,
 } from '../../../services/lineIdentityService.js'
 
 export default defineEventHandler(
   async (
-    event
+    event,
   ) => {
     // ========================================================
-    // Body
+    // Request Body
     // ========================================================
 
     const body =
       await readBody(
-        event
+        event,
       )
 
     const idToken =
       String(
         body?.idToken ||
-        ''
+        '',
       ).trim()
 
     if (
@@ -35,13 +31,13 @@ export default defineEventHandler(
       throw createError({
         statusCode: 400,
 
-        statusMessage:
+        message:
           '缺少 LINE ID Token',
       })
     }
 
     // ========================================================
-    // Teacher LINE Channel
+    // Teacher LINE Channel ID
     // ========================================================
 
     const runtimeConfig =
@@ -53,7 +49,7 @@ export default defineEventHandler(
           .teacherLineChannelId ||
         process.env
           .NUXT_TEACHER_LINE_CHANNEL_ID ||
-        ''
+        '',
       ).trim()
 
     if (
@@ -62,70 +58,70 @@ export default defineEventHandler(
       throw createError({
         statusCode: 500,
 
-        statusMessage:
+        message:
           '尚未設定 Teacher LINE Channel ID',
       })
     }
 
     // ========================================================
     // Resolve LINE Identity
-    //
-    // Teacher API 的 Role 永遠由 Server 固定為 TEACHER。
-    // 不接受前端傳 role。
     // ========================================================
 
-    const identity =
+    const result =
       await resolveLineIdentity({
         idToken,
 
-        role:
-          'TEACHER',
-
         channelId,
-      })
 
-    const sql =
-      useDatabase()
+        expectedRole:
+          'TEACHER',
+      })
 
     // ========================================================
     // App User
     // ========================================================
 
-    const users =
-      await sql`
-        SELECT
-          id,
-          role
-
-        FROM
-          app_users
-
-        WHERE
-          id =
-            ${identity.appUserId}
-
-        LIMIT 1
-      `
+    const user =
+      result?.user
 
     if (
-      !users.length
+      !user?.id
     ) {
-      throw createError({
-        statusCode: 401,
+      console.error(
+        'Teacher LINE Login：resolveLineIdentity 沒有回傳 user.id',
+        {
+          hasResult:
+            Boolean(
+              result,
+            ),
 
-        statusMessage:
-          '找不到老師帳號',
+          hasUser:
+            Boolean(
+              result?.user,
+            ),
+
+          hasIdentity:
+            Boolean(
+              result?.identity,
+            ),
+
+          bootstrapped:
+            Boolean(
+              result?.bootstrapped,
+            ),
+        },
+      )
+
+      throw createError({
+        statusCode: 500,
+
+        message:
+          'LINE 登入成功，但無法取得老師帳號',
       })
     }
 
-    const user =
-      users[0]
-
     // ========================================================
-    // Teacher Role
-    //
-    // 唯一老師只要角色是 TEACHER 即可。
-    // 不再檢查 organizations / organization_members。
+    // Role
     // ========================================================
 
     if (
@@ -135,43 +131,102 @@ export default defineEventHandler(
       throw createError({
         statusCode: 403,
 
-        statusMessage:
+        message:
           '此 LINE 帳號不是老師帳號',
       })
     }
 
     // ========================================================
-    // Create TapLife Session
+    // Status
     // ========================================================
 
-    await createAuthSession(
-      event,
-      user.id
+    if (
+      user.status !==
+      'ACTIVE'
+    ) {
+      throw createError({
+        statusCode: 403,
+
+        message:
+          '老師帳號目前未啟用',
+      })
+    }
+
+    // ========================================================
+    // Create Session
+    // ========================================================
+
+    const session =
+      await createAuthSession(
+        event,
+        user.id,
+      )
+
+    console.log(
+      'Teacher Session Created:',
+      {
+        userId:
+          user.id,
+
+        sessionId:
+          session?.id ||
+          null,
+
+        expiresAt:
+          session?.expiresAt ||
+          null,
+      },
     )
 
+    // ========================================================
+    // Response
+    // ========================================================
+
     return {
-      success: true,
+      success:
+        true,
 
       role:
         'TEACHER',
 
-      profile: {
-        name:
-          identity.profile
-            ?.name ||
+      user: {
+        id:
+          user.id,
+
+        displayName:
+          user.display_name ||
           null,
 
-        picture:
-          identity.profile
-            ?.picture ||
+        pictureUrl:
+          user.picture_url ||
           null,
       },
 
-      isNewUser:
-        identity.isNewUser,
+      profile: {
+        name:
+          result
+            ?.lineProfile
+            ?.displayName ||
+          user.display_name ||
+          null,
 
-      isNewIdentity:
-        identity.isNewIdentity,
+        picture:
+          result
+            ?.lineProfile
+            ?.pictureUrl ||
+          user.picture_url ||
+          null,
+      },
+
+      bootstrapped:
+        Boolean(
+          result?.bootstrapped,
+        ),
+
+      sessionCreated:
+        Boolean(
+          session,
+        ),
     }
-  }
+  },
 )

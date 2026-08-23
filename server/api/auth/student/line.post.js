@@ -12,7 +12,7 @@ import {
 
 export default defineEventHandler(
   async (
-    event
+    event,
   ) => {
     // ========================================================
     // Body
@@ -20,13 +20,13 @@ export default defineEventHandler(
 
     const body =
       await readBody(
-        event
+        event,
       )
 
     const idToken =
       String(
         body?.idToken ||
-        ''
+        '',
       ).trim()
 
     if (
@@ -35,31 +35,34 @@ export default defineEventHandler(
       throw createError({
         statusCode: 400,
 
-        statusMessage:
+        message:
           '缺少 LINE ID Token',
       })
     }
 
     // ========================================================
-    // Student Channel
+    // Student LINE Channel
     // ========================================================
 
     const runtimeConfig =
       useRuntimeConfig()
 
-    // LIFF ID 的格式是 <Channel ID>-<LIFF app ID>。
-    // Channel ID 本身不是密鑰；此備援可避免部署環境只設定
-    // NUXT_PUBLIC_STUDENT_LIFF_ID 時，登入驗證直接失敗。
+    // LIFF ID：
+    // <Channel ID>-<LIFF app ID>
+    //
+    // 如果 Vercel 沒有另外設定
+    // NUXT_STUDENT_LINE_CHANNEL_ID，
+    // 可以從 LIFF ID 前半段取得 Channel ID。
     const liffChannelId =
       String(
         runtimeConfig
           .public
           ?.studentLiffId ||
-        ''
+        '',
       )
         .trim()
         .split(
-          '-'
+          '-',
         )[0]
 
     const channelId =
@@ -69,7 +72,7 @@ export default defineEventHandler(
         process.env
           .NUXT_STUDENT_LINE_CHANNEL_ID ||
         liffChannelId ||
-        ''
+        '',
       ).trim()
 
     if (
@@ -78,63 +81,83 @@ export default defineEventHandler(
       throw createError({
         statusCode: 500,
 
-        statusMessage:
+        message:
           '尚未設定 Student LINE Channel ID',
       })
     }
 
     // ========================================================
-    // Resolve Identity
+    // Resolve Student LINE Identity
     //
-    // Role 永遠是 STUDENT。
+    // Role 永遠由 Server 固定為 STUDENT。
+    // 不接受前端指定角色。
     // ========================================================
 
-    const identity =
+    const result =
       await resolveLineIdentity({
         idToken,
 
-        role:
-          'STUDENT',
-
         channelId,
-      })
 
-    const sql =
-      useDatabase()
+        expectedRole:
+          'STUDENT',
+      })
 
     // ========================================================
     // App User
+    //
+    // 新版 resolveLineIdentity 回傳：
+    //
+    // {
+    //   user,
+    //   identity,
+    //   lineProfile,
+    //   bootstrapped
+    // }
     // ========================================================
 
-    const users =
-      await sql`
-        SELECT
-          id,
-          role
-
-        FROM
-          app_users
-
-        WHERE
-          id =
-            ${identity.appUserId}
-
-        LIMIT 1
-      `
+    const user =
+      result?.user
 
     if (
-      !users.length
+      !user?.id
     ) {
-      throw createError({
-        statusCode: 401,
+      console.error(
+        'Student LINE Login：resolveLineIdentity 沒有回傳 user.id',
+        {
+          hasResult:
+            Boolean(
+              result,
+            ),
 
-        statusMessage:
-          '找不到登入帳號',
+          hasUser:
+            Boolean(
+              result?.user,
+            ),
+
+          hasIdentity:
+            Boolean(
+              result?.identity,
+            ),
+
+          bootstrapped:
+            Boolean(
+              result?.bootstrapped,
+            ),
+        },
+      )
+
+      throw createError({
+        statusCode: 500,
+
+        message:
+          'LINE 登入成功，但無法取得學生帳號',
       })
     }
 
-    const user =
-      users[0]
+    // ========================================================
+    // Role
+    // ========================================================
 
     if (
       user.role !==
@@ -143,13 +166,35 @@ export default defineEventHandler(
       throw createError({
         statusCode: 403,
 
-        statusMessage:
+        message:
           '此 LINE 帳號不是學生帳號',
       })
     }
 
     // ========================================================
+    // Status
+    // ========================================================
+
+    if (
+      user.status !==
+      'ACTIVE'
+    ) {
+      throw createError({
+        statusCode: 403,
+
+        message:
+          '學生登入帳號目前未啟用',
+      })
+    }
+
+    const sql =
+      useDatabase()
+
+    // ========================================================
     // Student Binding
+    //
+    // 一個 STUDENT App User
+    // 最多只能綁定一筆 students。
     // ========================================================
 
     const students =
@@ -159,7 +204,11 @@ export default defineEventHandler(
 
           organization_id,
 
+          user_id,
+
           name,
+
+          note,
 
           status
 
@@ -180,8 +229,8 @@ export default defineEventHandler(
       throw createError({
         statusCode: 409,
 
-        statusMessage:
-          '此 LINE 帳號綁定多筆 Student，請聯絡老師處理',
+        message:
+          '此 LINE 帳號綁定多筆學生資料，請聯絡老師處理',
       })
     }
 
@@ -197,7 +246,7 @@ export default defineEventHandler(
       throw createError({
         statusCode: 403,
 
-        statusMessage:
+        message:
           '學生資料目前未啟用',
       })
     }
@@ -205,25 +254,52 @@ export default defineEventHandler(
     // ========================================================
     // Create Session
     //
-    // 即使 Student 尚未綁定，
-    // STUDENT App User 仍可以登入，
-    // 之後才能進行安全綁定流程。
+    // 即使尚未綁定 students，
+    // 也會先建立 STUDENT 登入 Session，
+    // 才能進入 /student/link 完成安全綁定。
     // ========================================================
 
-    await createAuthSession(
-      event,
-      user.id
+    const session =
+      await createAuthSession(
+        event,
+        user.id,
+      )
+
+    console.log(
+      'Student Session Created:',
+      {
+        userId:
+          user.id,
+
+        studentBound:
+          Boolean(
+            student,
+          ),
+
+        sessionId:
+          session?.id ||
+          null,
+
+        expiresAt:
+          session?.expiresAt ||
+          null,
+      },
     )
 
+    // ========================================================
+    // Response
+    // ========================================================
+
     return {
-      success: true,
+      success:
+        true,
 
       role:
         'STUDENT',
 
       studentBound:
         Boolean(
-          student
+          student,
         ),
 
       student:
@@ -240,20 +316,44 @@ export default defineEventHandler(
             }
           : null,
 
-      profile: {
-        name:
-          identity.profile
-            ?.name ||
+      user: {
+        id:
+          user.id,
+
+        displayName:
+          user.display_name ||
           null,
 
-        picture:
-          identity.profile
-            ?.picture ||
+        pictureUrl:
+          user.picture_url ||
           null,
       },
 
-      isNewUser:
-        identity.isNewUser,
+      profile: {
+        name:
+          result
+            ?.lineProfile
+            ?.displayName ||
+          user.display_name ||
+          null,
+
+        picture:
+          result
+            ?.lineProfile
+            ?.pictureUrl ||
+          user.picture_url ||
+          null,
+      },
+
+      bootstrapped:
+        Boolean(
+          result?.bootstrapped,
+        ),
+
+      sessionCreated:
+        Boolean(
+          session,
+        ),
     }
-  }
+  },
 )
