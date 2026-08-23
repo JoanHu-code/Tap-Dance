@@ -4,11 +4,11 @@ import {
 
 import {
   useDatabase,
-} from '../utils/db.js'
+} from '../../../../../utils/db.js'
 
 import {
   createAuditQuery,
-} from './auditService.js'
+} from '../../../../../services/auditService.js'
 
 // ============================================================
 // UUID
