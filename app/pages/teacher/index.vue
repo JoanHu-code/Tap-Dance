@@ -1,15 +1,28 @@
 <script setup>
 definePageMeta({
-  middleware:
-    'teacher-auth',
+  middleware: 'teacher-auth',
 })
+
+// ============================================================
+// Nuxt
+// ============================================================
+
+const {
+  $liff,
+} = useNuxtApp()
+
+const authStore =
+  useAuthStore()
 
 // ============================================================
 // State
 // ============================================================
 
-const loading =
+const authenticating =
   ref(true)
+
+const loading =
+  ref(false)
 
 const errorMessage =
   ref('')
@@ -31,25 +44,20 @@ const filteredStudents =
         .trim()
         .toLowerCase()
 
-    if (
-      !normalized
-    ) {
+    if (!normalized) {
       return students.value
     }
 
     return students.value.filter(
-      (
-        student
-      ) => {
+      (student) => {
         return String(
-          student.name ||
-          ''
+          student.name || '',
         )
           .toLowerCase()
           .includes(
-            normalized
+            normalized,
           )
-      }
+      },
     )
   })
 
@@ -58,21 +66,18 @@ const filteredStudents =
 // ============================================================
 
 const formatMoney = (
-  value
+  value,
 ) => {
-  return new Intl
-    .NumberFormat(
-      'zh-TW',
-      {
-        maximumFractionDigits:
-          0,
-      }
-    )
-    .format(
-      Number(
-        value || 0
-      )
-    )
+  return new Intl.NumberFormat(
+    'zh-TW',
+    {
+      maximumFractionDigits: 0,
+    },
+  ).format(
+    Number(
+      value || 0,
+    ),
+  )
 }
 
 // ============================================================
@@ -81,7 +86,7 @@ const formatMoney = (
 
 const getErrorMessage = (
   error,
-  fallback
+  fallback,
 ) => {
   return (
     error?.data?.statusMessage ||
@@ -92,43 +97,179 @@ const getErrorMessage = (
 }
 
 // ============================================================
-// Load
+// Load Students
 // ============================================================
 
 const loadStudents =
   async () => {
-    loading.value =
+    loading.value = true
+
+    try {
+      const response =
+        await $fetch(
+          '/api/teacher/workspace',
+        )
+
+      students.value =
+        response.students ||
+        []
+    }
+    catch (error) {
+      console.error(
+        '學生列表載入失敗：',
+        error,
+      )
+
+      throw error
+    }
+    finally {
+      loading.value = false
+    }
+  }
+
+// ============================================================
+// Teacher LIFF Login
+// ============================================================
+
+const loginTeacher =
+  async () => {
+    authenticating.value =
       true
 
     errorMessage.value =
       ''
 
     try {
-      const response =
-        await $fetch(
-          '/api/teacher/workspace'
+      // ======================================================
+      // 1. Initialize Teacher LIFF
+      // ======================================================
+
+      await $liff.initialize(
+        'TEACHER',
+      )
+
+      // ======================================================
+      // 2. LINE 尚未登入
+      // ======================================================
+
+      if (
+        !$liff.isLoggedIn()
+      ) {
+        await $liff.login(
+          'TEACHER',
         )
 
-      students.value =
-        response.students ||
-        []
-    } catch (
-      error
-    ) {
+        return
+      }
+
+      // ======================================================
+      // 3. 先確認既有 Session
+      // ======================================================
+
+      const existingSession =
+        await authStore
+          .fetchTeacherMe({
+            force: true,
+          })
+
+      if (
+        existingSession?.success &&
+        authStore.isTeacher
+      ) {
+        await loadStudents()
+
+        return
+      }
+
+      // ======================================================
+      // 4. 取得 LINE ID Token
+      // ======================================================
+
+      const idToken =
+        await $liff.getIdToken(
+          'TEACHER',
+        )
+
+      if (!idToken) {
+        throw new Error(
+          'LINE 已登入，但無法取得 ID Token',
+        )
+      }
+
+      // ======================================================
+      // 5. LINE → TapLife Login
+      // ======================================================
+
+      const loginResponse =
+        await $fetch(
+          '/api/auth/teacher/line',
+          {
+            method: 'POST',
+
+            body: {
+              idToken,
+            },
+          },
+        )
+
+      if (
+        !loginResponse?.success
+      ) {
+        throw new Error(
+          '老師 LINE 登入失敗',
+        )
+      }
+
+      // ======================================================
+      // 6. 確認 Session Cookie
+      // ======================================================
+
+      const sessionResult =
+        await authStore
+          .fetchTeacherMe({
+            force: true,
+          })
+
+      if (
+        !sessionResult?.success ||
+        !authStore.isTeacher
+      ) {
+        throw new Error(
+          'LINE 驗證成功，但系統登入 Session 建立失敗',
+        )
+      }
+
+      // ======================================================
+      // 7. Load Dashboard
+      // ======================================================
+
+      await loadStudents()
+    }
+    catch (error) {
       console.error(
-        '學生列表載入失敗：',
-        error
+        'Teacher LIFF 登入失敗：',
+        error,
       )
 
       errorMessage.value =
         getErrorMessage(
           error,
-          '學生資料載入失敗'
+          'LINE 登入失敗，請重新開啟 Teacher LIFF',
         )
-    } finally {
-      loading.value =
+    }
+    finally {
+      authenticating.value =
         false
     }
+  }
+
+// ============================================================
+// Retry
+// ============================================================
+
+const retryLogin =
+  async () => {
+    await loginTeacher()
   }
 
 // ============================================================
@@ -137,8 +278,8 @@ const loadStudents =
 
 onMounted(
   async () => {
-    await loadStudents()
-  }
+    await loginTeacher()
+  },
 )
 </script>
 
@@ -146,219 +287,271 @@ onMounted(
   <main class="teacher-dashboard">
     <div class="container">
       <!-- ====================================================
-           Header
+           Login
            ==================================================== -->
 
-      <header class="page-header">
-        <div>
-          <span>
-            TapLife
-          </span>
+      <section
+        v-if="authenticating"
+        class="login-state"
+      >
+        <div class="spinner" />
 
-          <h1>
-            學生
-          </h1>
+        <h1>
+          LINE 登入中
+        </h1>
 
-          <p>
-            點選學生即可簽到、請假、查看堂數與開始下一輪。
-          </p>
-        </div>
-      </header>
-
-      <!-- ====================================================
-           Main Navigation
-           ==================================================== -->
-
-      <nav class="main-nav">
-        <NuxtLink
-          to="/teacher"
-          class="active"
-        >
-          學生管理
-        </NuxtLink>
-
-        <NuxtLink
-          to="/teacher/courses"
-        >
-          課堂管理
-        </NuxtLink>
-
-        <NuxtLink
-          to="/teacher/audit"
-        >
-          操作紀錄
-        </NuxtLink>
-      </nav>
-
-      <!-- ====================================================
-           Search
-           ==================================================== -->
-
-      <section class="search-section">
-        <input
-          v-model="
-            keyword
-          "
-          type="search"
-          placeholder="搜尋學生姓名"
-        >
+        <p>
+          正在確認老師身分...
+        </p>
       </section>
 
       <!-- ====================================================
-           Error
-           ==================================================== -->
-
-      <div
-        v-if="
-          errorMessage
-        "
-        class="error-message"
-      >
-        {{
-          errorMessage
-        }}
-      </div>
-
-      <!-- ====================================================
-           Loading
-           ==================================================== -->
-
-      <div
-        v-if="
-          loading
-        "
-        class="empty-state"
-      >
-        載入學生中...
-      </div>
-
-      <!-- ====================================================
-           Students
+           Login Error
            ==================================================== -->
 
       <section
         v-else-if="
-          filteredStudents.length
+          errorMessage &&
+          !authStore.isTeacher
         "
-        class="student-list"
+        class="login-state error"
       >
-        <NuxtLink
-          v-for="
-            student in
-              filteredStudents
-          "
-          :key="
-            student.id
-          "
-          :to="
-            `/teacher/students/${student.id}`
-          "
-          class="student-card"
+        <h1>
+          無法登入
+        </h1>
+
+        <p>
+          {{ errorMessage }}
+        </p>
+
+        <button
+          type="button"
+          @click="retryLogin"
         >
-          <!-- Student -->
-
-          <header>
-            <div>
-              <span>
-                {{
-                  student.user_id
-                    ? 'LINE 已綁定'
-                    : 'LINE 未綁定'
-                }}
-              </span>
-
-              <h2>
-                {{
-                  student.name
-                }}
-              </h2>
-            </div>
-
-            <span class="arrow">
-              ›
-            </span>
-          </header>
-
-          <!-- No Package -->
-
-          <div
-            v-if="
-              !student
-                .active_packages
-                ?.length
-            "
-            class="no-package"
-          >
-            尚未建立課程方案
-          </div>
-
-          <!-- Packages -->
-
-          <section
-            v-else
-            class="package-list"
-          >
-            <article
-              v-for="
-                packageData in
-                  student.active_packages
-              "
-              :key="
-                packageData.id
-              "
-            >
-              <div class="package-name">
-                <strong>
-                  {{
-                    packageData.course_name
-                  }}
-                </strong>
-
-                <span>
-                  {{
-                    packageData.purchased_cycles
-                  }}
-                  期
-                  ・
-                  $
-                  {{
-                    formatMoney(
-                      packageData.price
-                    )
-                  }}
-                </span>
-              </div>
-
-              <div class="package-progress">
-                <strong>
-                  {{
-                    packageData.used_sessions
-                  }}
-                  /
-                  {{
-                    packageData.total_sessions
-                  }}
-                </strong>
-
-                <span>
-                  剩
-                  {{
-                    packageData.remaining_sessions
-                  }}
-                  堂
-                </span>
-              </div>
-            </article>
-          </section>
-        </NuxtLink>
+          重新登入
+        </button>
       </section>
 
-      <div
-        v-else
-        class="empty-state"
-      >
-        沒有符合條件的學生。
-      </div>
+      <!-- ====================================================
+           Dashboard
+           ==================================================== -->
+
+      <template v-else>
+        <header class="page-header">
+          <div>
+            <span>
+              TapLife
+            </span>
+
+            <h1>
+              學生
+            </h1>
+
+            <p>
+              點選學生即可查看課程、堂數與上課紀錄。
+            </p>
+          </div>
+        </header>
+
+        <!-- ==================================================
+             Navigation
+             ================================================== -->
+
+        <nav class="main-nav">
+          <NuxtLink
+            to="/teacher"
+            class="active"
+          >
+            學生管理
+          </NuxtLink>
+
+          <NuxtLink
+            to="/teacher/courses"
+          >
+            課堂管理
+          </NuxtLink>
+
+          <NuxtLink
+            to="/teacher/audit"
+          >
+            操作紀錄
+          </NuxtLink>
+        </nav>
+
+        <!-- ==================================================
+             Search
+             ================================================== -->
+
+        <section class="search-section">
+          <input
+            v-model="keyword"
+            type="search"
+            placeholder="搜尋學生姓名"
+          >
+        </section>
+
+        <!-- ==================================================
+             Error
+             ================================================== -->
+
+        <div
+          v-if="errorMessage"
+          class="error-message"
+        >
+          {{ errorMessage }}
+        </div>
+
+        <!-- ==================================================
+             Loading
+             ================================================== -->
+
+        <div
+          v-if="loading"
+          class="empty-state"
+        >
+          載入學生中...
+        </div>
+
+        <!-- ==================================================
+             Student List
+             ================================================== -->
+
+        <section
+          v-else-if="
+            filteredStudents.length
+          "
+          class="student-list"
+        >
+          <NuxtLink
+            v-for="
+              student in
+                filteredStudents
+            "
+            :key="student.id"
+            :to="
+              `/teacher/students/${student.id}`
+            "
+            class="student-card"
+          >
+            <header>
+              <div>
+                <span>
+                  {{
+                    student.user_id
+                      ? 'LINE 已綁定'
+                      : 'LINE 未綁定'
+                  }}
+                </span>
+
+                <h2>
+                  {{ student.name }}
+                </h2>
+              </div>
+
+              <span class="arrow">
+                ›
+              </span>
+            </header>
+
+            <!-- ==============================================
+                 No Package
+                 ============================================== -->
+
+            <div
+              v-if="
+                !student
+                  .active_packages
+                  ?.length
+              "
+              class="no-package"
+            >
+              尚未建立課程方案
+            </div>
+
+            <!-- ==============================================
+                 Packages
+                 ============================================== -->
+
+            <section
+              v-else
+              class="package-list"
+            >
+              <article
+                v-for="
+                  packageData in
+                    student.active_packages
+                "
+                :key="
+                  packageData.id
+                "
+              >
+                <div class="package-name">
+                  <strong>
+                    {{
+                      packageData
+                        .course_name
+                    }}
+                  </strong>
+
+                  <span>
+                    {{
+                      packageData
+                        .purchased_cycles ||
+                      1
+                    }}
+                    期
+                    ・
+                    $
+                    {{
+                      formatMoney(
+                        packageData.price,
+                      )
+                    }}
+                  </span>
+                </div>
+
+                <div class="package-progress">
+                  <strong>
+                    {{
+                      packageData
+                        .used_sessions
+                    }}
+                    /
+                    {{
+                      packageData
+                        .total_sessions
+                    }}
+                  </strong>
+
+                  <span>
+                    剩
+                    {{
+                      packageData
+                        .remaining_sessions
+                    }}
+                    堂
+                  </span>
+                </div>
+              </article>
+            </section>
+          </NuxtLink>
+        </section>
+
+        <!-- ==================================================
+             Empty
+             ================================================== -->
+
+        <div
+          v-else
+          class="empty-state"
+        >
+          {{
+            keyword
+              ? '沒有符合條件的學生。'
+              : '目前還沒有學生。'
+          }}
+        </div>
+      </template>
     </div>
   </main>
 </template>
@@ -375,6 +568,60 @@ onMounted(
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
+}
+
+/* ============================================================
+   Login
+   ============================================================ */
+
+.login-state {
+  min-height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.login-state h1 {
+  margin: 13px 0 0;
+  font-size: 21px;
+}
+
+.login-state p {
+  margin: 6px 0 0;
+  color: #888888;
+  font-size: 10px;
+}
+
+.login-state button {
+  min-height: 39px;
+  margin-top: 16px;
+  padding: 0 18px;
+  border: 0;
+  background: #222222;
+  border-radius: 9px;
+  color: #ffffff;
+  font-size: 9px;
+}
+
+.login-state.error h1 {
+  color: #c94343;
+}
+
+.spinner {
+  width: 29px;
+  height: 29px;
+  border: 3px solid #dddddd;
+  border-top-color: #222222;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ============================================================
@@ -490,7 +737,7 @@ onMounted(
 }
 
 /* ============================================================
-   Packages
+   Package
    ============================================================ */
 
 .package-list {

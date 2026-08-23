@@ -1,15 +1,28 @@
 <script setup>
 definePageMeta({
-  middleware:
-    'student-auth',
+  middleware: 'student-auth',
 })
+
+// ============================================================
+// Nuxt / Auth
+// ============================================================
+
+const {
+  $liff,
+} = useNuxtApp()
+
+const authStore =
+  useAuthStore()
 
 // ============================================================
 // State
 // ============================================================
 
-const loading =
+const authenticating =
   ref(true)
+
+const loading =
+  ref(false)
 
 const resetSaving =
   ref(false)
@@ -74,27 +87,29 @@ const resetPackage =
 
 const getTaipeiToday =
   () => {
-    return new Intl
-      .DateTimeFormat(
-        'en-CA',
-        {
-          timeZone:
-            'Asia/Taipei',
+    return new Intl.DateTimeFormat(
+      'en-CA',
+      {
+        timeZone:
+          'Asia/Taipei',
 
-          year:
-            'numeric',
+        year:
+          'numeric',
 
-          month:
-            '2-digit',
+        month:
+          '2-digit',
 
-          day:
-            '2-digit',
-        },
-      )
-      .format(
-        new Date(),
-      )
+        day:
+          '2-digit',
+      },
+    ).format(
+      new Date(),
+    )
   }
+
+// ============================================================
+// Reset Form
+// ============================================================
 
 const resetForm =
   reactive({
@@ -131,21 +146,22 @@ const resetPurchasedCycles =
     const parsed =
       Number.parseInt(
         String(
-          resetForm
-            .purchasedCycles ||
+          resetForm.purchasedCycles ||
           1,
         ),
         10,
       )
 
-    return Math.max(
-      Number.isInteger(
+    if (
+      !Number.isInteger(
         parsed,
-      )
-        ? parsed
-        : 1,
-      1,
-    )
+      ) ||
+      parsed <= 0
+    ) {
+      return 1
+    }
+
+    return parsed
   })
 
 const resetTotalSessions =
@@ -171,9 +187,7 @@ const resetTotalPrice =
 const formatDateTime = (
   value,
 ) => {
-  if (
-    !value
-  ) {
+  if (!value) {
     return '-'
   }
 
@@ -192,35 +206,33 @@ const formatDateTime = (
     )
   }
 
-  return new Intl
-    .DateTimeFormat(
-      'zh-TW',
-      {
-        timeZone:
-          'Asia/Taipei',
+  return new Intl.DateTimeFormat(
+    'zh-TW',
+    {
+      timeZone:
+        'Asia/Taipei',
 
-        year:
-          'numeric',
+      year:
+        'numeric',
 
-        month:
-          '2-digit',
+      month:
+        '2-digit',
 
-        day:
-          '2-digit',
+      day:
+        '2-digit',
 
-        hour:
-          '2-digit',
+      hour:
+        '2-digit',
 
-        minute:
-          '2-digit',
+      minute:
+        '2-digit',
 
-        hourCycle:
-          'h23',
-      },
-    )
-    .format(
-      date,
-    )
+      hourCycle:
+        'h23',
+    },
+  ).format(
+    date,
+  )
 }
 
 const formatMoney = (
@@ -229,8 +241,7 @@ const formatMoney = (
   return new Intl.NumberFormat(
     'zh-TW',
     {
-      maximumFractionDigits:
-        0,
+      maximumFractionDigits: 0,
     },
   ).format(
     Number(
@@ -336,8 +347,7 @@ const getErrorMessage = (
   fallback,
 ) => {
   return (
-    error?.data
-      ?.statusMessage ||
+    error?.data?.statusMessage ||
     error?.statusMessage ||
     error?.message ||
     fallback
@@ -348,51 +358,49 @@ const getErrorMessage = (
 // Query
 // ============================================================
 
-const buildQuery = () => {
-  const query = {}
+const buildQuery =
+  () => {
+    const query = {}
 
-  if (
-    courseFilters.courseId
-  ) {
-    query.courseId =
+    if (
       courseFilters.courseId
-  }
+    ) {
+      query.courseId =
+        courseFilters.courseId
+    }
 
-  if (
-    courseFilters.status
-  ) {
-    query.packageStatus =
+    if (
       courseFilters.status
-  }
+    ) {
+      query.packageStatus =
+        courseFilters.status
+    }
 
-  if (
-    auditFilters.actorRole
-  ) {
-    query.actorRole =
+    if (
       auditFilters.actorRole
-  }
+    ) {
+      query.actorRole =
+        auditFilters.actorRole
+    }
 
-  if (
-    auditFilters.action
-  ) {
-    query.auditAction =
+    if (
       auditFilters.action
-  }
+    ) {
+      query.auditAction =
+        auditFilters.action
+    }
 
-  return query
-}
+    return query
+  }
 
 // ============================================================
-// Load
+// Load Student Workspace
 // ============================================================
 
 const loadWorkspace =
   async () => {
     loading.value =
       true
-
-    errorMessage.value =
-      ''
 
     try {
       const response =
@@ -430,16 +438,185 @@ const loadWorkspace =
         error,
       )
 
-      errorMessage.value =
-        getErrorMessage(
-          error,
-          '資料載入失敗',
-        )
+      throw error
     }
     finally {
       loading.value =
         false
     }
+  }
+
+// ============================================================
+// Student LIFF Login
+// ============================================================
+
+const loginStudent =
+  async () => {
+    authenticating.value =
+      true
+
+    errorMessage.value =
+      ''
+
+    try {
+      // ======================================================
+      // 1. Initialize Student LIFF
+      // ======================================================
+
+      await $liff.initialize(
+        'STUDENT',
+      )
+
+      // ======================================================
+      // 2. LINE 尚未登入
+      // ======================================================
+
+      if (
+        !$liff.isLoggedIn()
+      ) {
+        await $liff.login(
+          'STUDENT',
+        )
+
+        return
+      }
+
+      // ======================================================
+      // 3. 先確認既有 Session
+      // ======================================================
+
+      const existingSession =
+        await authStore
+          .fetchStudentMe({
+            force: true,
+          })
+
+      if (
+        existingSession?.success &&
+        authStore.isStudent
+      ) {
+        // ====================================================
+        // 已登入，但尚未綁定 students
+        // ====================================================
+
+        if (
+          !authStore.linked
+        ) {
+          await navigateTo(
+            '/student/link',
+          )
+
+          return
+        }
+
+        await loadWorkspace()
+
+        return
+      }
+
+      // ======================================================
+      // 4. LINE ID Token
+      // ======================================================
+
+      const idToken =
+        await $liff.getIdToken(
+          'STUDENT',
+        )
+
+      if (!idToken) {
+        throw new Error(
+          'LINE 已登入，但無法取得 ID Token',
+        )
+      }
+
+      // ======================================================
+      // 5. LINE → TapLife Login
+      // ======================================================
+
+      const loginResponse =
+        await $fetch(
+          '/api/auth/student/line',
+          {
+            method: 'POST',
+
+            body: {
+              idToken,
+            },
+          },
+        )
+
+      if (
+        !loginResponse?.success
+      ) {
+        throw new Error(
+          '學生 LINE 登入失敗',
+        )
+      }
+
+      // ======================================================
+      // 6. 再確認 Session
+      // ======================================================
+
+      const sessionResult =
+        await authStore
+          .fetchStudentMe({
+            force: true,
+          })
+
+      if (
+        !sessionResult?.success ||
+        !authStore.isStudent
+      ) {
+        throw new Error(
+          'LINE 驗證成功，但學生 Session 建立失敗',
+        )
+      }
+
+      // ======================================================
+      // 7. 尚未綁 students
+      // ======================================================
+
+      if (
+        !authStore.linked
+      ) {
+        await navigateTo(
+          '/student/link',
+        )
+
+        return
+      }
+
+      // ======================================================
+      // 8. Load Workspace
+      // ======================================================
+
+      await loadWorkspace()
+    }
+    catch (error) {
+      console.error(
+        'Student LIFF 登入失敗：',
+        error,
+      )
+
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          'LINE 登入失敗，請重新開啟 Student LIFF',
+        )
+    }
+    finally {
+      authenticating.value =
+        false
+    }
+  }
+
+// ============================================================
+// Retry
+// ============================================================
+
+const retryLogin =
+  async () => {
+    await loginStudent()
   }
 
 // ============================================================
@@ -454,7 +631,16 @@ const clearCourseFilters =
     courseFilters.status =
       ''
 
-    await loadWorkspace()
+    try {
+      await loadWorkspace()
+    }
+    catch (error) {
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '課程資料查詢失敗',
+        )
+    }
   }
 
 // ============================================================
@@ -469,29 +655,58 @@ const clearAuditFilters =
     auditFilters.action =
       ''
 
-    await loadWorkspace()
+    try {
+      await loadWorkspace()
+    }
+    catch (error) {
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '操作紀錄查詢失敗',
+        )
+    }
+  }
+
+// ============================================================
+// Search Workspace
+// ============================================================
+
+const searchWorkspace =
+  async () => {
+    errorMessage.value =
+      ''
+
+    try {
+      await loadWorkspace()
+    }
+    catch (error) {
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '資料查詢失敗',
+        )
+    }
   }
 
 // ============================================================
 // Open Reset
 // ============================================================
 
-const openReset =
-  (
-    packageData,
-  ) => {
-    resetPackage.value =
-      packageData
+const openReset = (
+  packageData,
+) => {
+  resetPackage.value =
+    packageData
 
-    resetForm.purchasedCycles =
-      1
+  resetForm.purchasedCycles =
+    1
 
-    resetForm.startDate =
-      getTaipeiToday()
+  resetForm.startDate =
+    getTaipeiToday()
 
-    showResetDialog.value =
-      true
-  }
+  showResetDialog.value =
+    true
+}
 
 // ============================================================
 // Close Reset
@@ -544,8 +759,7 @@ const submitReset =
         await $fetch(
           '/api/student/workspace/reset',
           {
-            method:
-              'POST',
+            method: 'POST',
 
             body: {
               packageId:
@@ -599,7 +813,7 @@ const submitReset =
 
 onMounted(
   async () => {
-    await loadWorkspace()
+    await loginStudent()
   },
 )
 </script>
@@ -608,384 +822,441 @@ onMounted(
   <main class="student-page">
     <div class="container">
       <!-- ====================================================
-           Header
+           Login
            ==================================================== -->
 
-      <header class="page-header">
-        <div>
-          <span>
-            TapLife
-          </span>
+      <section
+        v-if="authenticating"
+        class="login-state"
+      >
+        <div class="spinner" />
 
-          <h1>
-            {{
-              student?.name ||
-              '我的課程'
-            }}
-          </h1>
+        <h1>
+          LINE 登入中
+        </h1>
 
-          <p>
-            查看課程進度、完成日期與完整操作紀錄。
-          </p>
-        </div>
-      </header>
+        <p>
+          正在確認學生身分...
+        </p>
+      </section>
 
       <!-- ====================================================
-           Message
+           Login Error
            ==================================================== -->
 
-      <div
-        v-if="errorMessage"
-        class="error-message"
+      <section
+        v-else-if="
+          errorMessage &&
+          !authStore.isStudent
+        "
+        class="login-state error"
       >
-        {{ errorMessage }}
-      </div>
+        <h1>
+          無法登入
+        </h1>
 
-      <div
-        v-if="successMessage"
-        class="success-message"
-      >
-        {{ successMessage }}
-      </div>
+        <p>
+          {{ errorMessage }}
+        </p>
+
+        <button
+          type="button"
+          @click="retryLogin"
+        >
+          重新登入
+        </button>
+      </section>
 
       <!-- ====================================================
-           Loading
+           Student Page
            ==================================================== -->
-
-      <div
-        v-if="loading"
-        class="empty-state"
-      >
-        載入資料中...
-      </div>
 
       <template v-else>
         <!-- ==================================================
-             Courses
+             Header
              ================================================== -->
 
-        <section class="section">
-          <div class="section-header">
-            <div>
-              <span>
-                My Courses
-              </span>
+        <header class="page-header">
+          <div>
+            <span>
+              TapLife
+            </span>
 
-              <h2>
-                我的課程
-              </h2>
-            </div>
+            <h1>
+              {{
+                student?.name ||
+                '我的課程'
+              }}
+            </h1>
+
+            <p>
+              查看課程進度、完成日期與完整操作紀錄。
+            </p>
           </div>
-
-          <!-- ================================================
-               Filters
-               ================================================ -->
-
-          <div class="filters">
-            <label>
-              <span>
-                課程
-              </span>
-
-              <select
-                v-model="
-                  courseFilters.courseId
-                "
-              >
-                <option value="">
-                  全部課程
-                </option>
-
-                <option
-                  v-for="course in courses"
-                  :key="course.id"
-                  :value="course.id"
-                >
-                  {{ course.name }}
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>
-                狀態
-              </span>
-
-              <select
-                v-model="
-                  courseFilters.status
-                "
-              >
-                <option value="">
-                  全部狀態
-                </option>
-
-                <option value="ACTIVE">
-                  進行中
-                </option>
-
-                <option value="COMPLETED">
-                  已完成
-                </option>
-
-                <option value="CANCELLED">
-                  已取消
-                </option>
-              </select>
-            </label>
-
-            <button
-              type="button"
-              @click="
-                loadWorkspace
-              "
-            >
-              查詢
-            </button>
-
-            <button
-              type="button"
-              class="secondary"
-              @click="
-                clearCourseFilters
-              "
-            >
-              清除
-            </button>
-          </div>
-
-          <!-- ================================================
-               Table
-               ================================================ -->
-
-          <StudentStudentCourseTable
-            :packages="packages"
-            :resetting-id="
-              resettingId
-            "
-            @reset="
-              openReset
-            "
-          />
-        </section>
+        </header>
 
         <!-- ==================================================
-             Audit
+             Message
              ================================================== -->
 
-        <section class="section audit-section">
-          <div class="section-header">
-            <div>
-              <span>
-                Audit Log
-              </span>
+        <div
+          v-if="errorMessage"
+          class="error-message"
+        >
+          {{ errorMessage }}
+        </div>
 
-              <h2>
-                操作紀錄
-              </h2>
+        <div
+          v-if="successMessage"
+          class="success-message"
+        >
+          {{ successMessage }}
+        </div>
 
-              <p>
-                老師與學生對你的資料所做的修改都會保留。
-              </p>
+        <!-- ==================================================
+             Loading
+             ================================================== -->
+
+        <div
+          v-if="loading"
+          class="empty-state"
+        >
+          載入資料中...
+        </div>
+
+        <template v-else>
+          <!-- ================================================
+               Courses
+               ================================================ -->
+
+          <section class="section">
+            <div class="section-header">
+              <div>
+                <span>
+                  My Courses
+                </span>
+
+                <h2>
+                  我的課程
+                </h2>
+              </div>
             </div>
 
-            <span class="log-count">
-              {{ auditLogs.length }} 筆
-            </span>
-          </div>
+            <!-- ==============================================
+                 Filters
+                 ============================================== -->
 
-          <!-- ================================================
-               Audit Filters
-               ================================================ -->
+            <div class="filters">
+              <label>
+                <span>
+                  課程
+                </span>
 
-          <div class="filters audit-filters">
-            <label>
-              <span>
-                操作者
-              </span>
+                <select
+                  v-model="
+                    courseFilters.courseId
+                  "
+                >
+                  <option value="">
+                    全部課程
+                  </option>
 
-              <select
-                v-model="
-                  auditFilters.actorRole
+                  <option
+                    v-for="
+                      course in courses
+                    "
+                    :key="course.id"
+                    :value="course.id"
+                  >
+                    {{ course.name }}
+                  </option>
+                </select>
+              </label>
+
+              <label>
+                <span>
+                  狀態
+                </span>
+
+                <select
+                  v-model="
+                    courseFilters.status
+                  "
+                >
+                  <option value="">
+                    全部狀態
+                  </option>
+
+                  <option value="ACTIVE">
+                    進行中
+                  </option>
+
+                  <option value="COMPLETED">
+                    已完成
+                  </option>
+
+                  <option value="CANCELLED">
+                    已取消
+                  </option>
+                </select>
+              </label>
+
+              <button
+                type="button"
+                @click="
+                  searchWorkspace
                 "
               >
-                <option value="">
-                  全部
-                </option>
+                查詢
+              </button>
 
-                <option value="TEACHER">
-                  老師
-                </option>
-
-                <option value="STUDENT">
-                  學生
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>
-                操作
-              </span>
-
-              <select
-                v-model="
-                  auditFilters.action
+              <button
+                type="button"
+                class="secondary"
+                @click="
+                  clearCourseFilters
                 "
               >
-                <option value="">
-                  全部
-                </option>
+                清除
+              </button>
+            </div>
 
-                <option
-                  v-for="
-                    action in
-                      auditActions
-                  "
-                  :key="action"
-                  :value="action"
-                >
-                  {{
-                    getActionLabel(
-                      action
-                    )
-                  }}
-                </option>
-              </select>
-            </label>
+            <!-- ==============================================
+                 Course Table
+                 ============================================== -->
 
-            <button
-              type="button"
-              @click="
-                loadWorkspace
+            <StudentStudentCourseTable
+              :packages="
+                packages
               "
-            >
-              查詢
-            </button>
-
-            <button
-              type="button"
-              class="secondary"
-              @click="
-                clearAuditFilters
+              :resetting-id="
+                resettingId
               "
-            >
-              清除
-            </button>
-          </div>
+              @reset="
+                openReset
+              "
+            />
+          </section>
 
           <!-- ================================================
-               Audit Table
+               Audit Log
                ================================================ -->
 
-          <div class="audit-table-wrapper">
-            <table
-              v-if="
-                auditLogs.length
-              "
-              class="audit-table"
-            >
-              <thead>
-                <tr>
-                  <th>
-                    時間
-                  </th>
+          <section class="section audit-section">
+            <div class="section-header">
+              <div>
+                <span>
+                  Audit Log
+                </span>
 
-                  <th>
-                    操作者
-                  </th>
+                <h2>
+                  操作紀錄
+                </h2>
 
-                  <th>
-                    類型
-                  </th>
+                <p>
+                  老師與學生對你的資料所做的修改都會保留。
+                </p>
+              </div>
 
-                  <th>
-                    操作
-                  </th>
+              <span class="log-count">
+                {{ auditLogs.length }}
+                筆
+              </span>
+            </div>
 
-                  <th>
-                    課程
-                  </th>
+            <!-- ==============================================
+                 Filters
+                 ============================================== -->
 
-                  <th>
-                    說明
-                  </th>
-                </tr>
-              </thead>
+            <div class="filters audit-filters">
+              <label>
+                <span>
+                  操作者
+                </span>
 
-              <tbody>
-                <tr
-                  v-for="
-                    log in auditLogs
+                <select
+                  v-model="
+                    auditFilters.actorRole
                   "
-                  :key="log.id"
                 >
-                  <td data-label="時間">
-                    {{
-                      formatDateTime(
-                        log.created_at
-                      )
-                    }}
-                  </td>
+                  <option value="">
+                    全部
+                  </option>
 
-                  <td data-label="操作者">
-                    <strong>
-                      {{
-                        getActorLabel(
-                          log.actor_role
-                        )
-                      }}
-                    </strong>
+                  <option value="TEACHER">
+                    老師
+                  </option>
 
-                    <small>
-                      {{
-                        log.actor_name ||
-                        ''
-                      }}
-                    </small>
-                  </td>
+                  <option value="STUDENT">
+                    學生
+                  </option>
+                </select>
+              </label>
 
-                  <td data-label="類型">
-                    {{
-                      getEntityLabel(
-                        log.entity_type
-                      )
-                    }}
-                  </td>
+              <label>
+                <span>
+                  操作
+                </span>
 
-                  <td data-label="操作">
+                <select
+                  v-model="
+                    auditFilters.action
+                  "
+                >
+                  <option value="">
+                    全部
+                  </option>
+
+                  <option
+                    v-for="
+                      action in
+                        auditActions
+                    "
+                    :key="action"
+                    :value="action"
+                  >
                     {{
                       getActionLabel(
-                        log.action
+                        action,
                       )
                     }}
-                  </td>
+                  </option>
+                </select>
+              </label>
 
-                  <td data-label="課程">
-                    {{
-                      log.course_name ||
-                      '-'
-                    }}
-                  </td>
+              <button
+                type="button"
+                @click="
+                  searchWorkspace
+                "
+              >
+                查詢
+              </button>
 
-                  <td data-label="說明">
-                    {{
-                      log.note ||
-                      '-'
-                    }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            <div
-              v-else
-              class="empty-state compact"
-            >
-              沒有符合條件的操作紀錄。
+              <button
+                type="button"
+                class="secondary"
+                @click="
+                  clearAuditFilters
+                "
+              >
+                清除
+              </button>
             </div>
-          </div>
-        </section>
+
+            <!-- ==============================================
+                 Audit Table
+                 ============================================== -->
+
+            <div class="audit-table-wrapper">
+              <table
+                v-if="
+                  auditLogs.length
+                "
+                class="audit-table"
+              >
+                <thead>
+                  <tr>
+                    <th>
+                      時間
+                    </th>
+
+                    <th>
+                      操作者
+                    </th>
+
+                    <th>
+                      類型
+                    </th>
+
+                    <th>
+                      操作
+                    </th>
+
+                    <th>
+                      課程
+                    </th>
+
+                    <th>
+                      說明
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  <tr
+                    v-for="
+                      log in auditLogs
+                    "
+                    :key="log.id"
+                  >
+                    <td data-label="時間">
+                      {{
+                        formatDateTime(
+                          log.created_at,
+                        )
+                      }}
+                    </td>
+
+                    <td data-label="操作者">
+                      <strong>
+                        {{
+                          getActorLabel(
+                            log.actor_role,
+                          )
+                        }}
+                      </strong>
+
+                      <small>
+                        {{
+                          log.actor_name ||
+                          ''
+                        }}
+                      </small>
+                    </td>
+
+                    <td data-label="類型">
+                      {{
+                        getEntityLabel(
+                          log.entity_type,
+                        )
+                      }}
+                    </td>
+
+                    <td data-label="操作">
+                      {{
+                        getActionLabel(
+                          log.action,
+                        )
+                      }}
+                    </td>
+
+                    <td data-label="課程">
+                      {{
+                        log.course_name ||
+                        '-'
+                      }}
+                    </td>
+
+                    <td data-label="說明">
+                      {{
+                        log.note ||
+                        '-'
+                      }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div
+                v-else
+                class="empty-state compact"
+              >
+                沒有符合條件的操作紀錄。
+              </div>
+            </div>
+          </section>
+        </template>
       </template>
     </div>
 
@@ -1010,10 +1281,6 @@ onMounted(
             submitReset
           "
         >
-          <!-- ================================================
-               Header
-               ================================================ -->
-
           <header>
             <div>
               <span>
@@ -1070,7 +1337,7 @@ onMounted(
           </section>
 
           <!-- ================================================
-               Cycle
+               Cycles
                ================================================ -->
 
           <label>
@@ -1080,8 +1347,7 @@ onMounted(
 
             <input
               v-model.number="
-                resetForm
-                  .purchasedCycles
+                resetForm.purchasedCycles
               "
               type="number"
               min="1"
@@ -1108,15 +1374,15 @@ onMounted(
               :class="{
                 selected:
                   resetPurchasedCycles ===
-                    count,
+                  count,
               }"
               @click="
-                resetForm
-                  .purchasedCycles =
-                    count
+                resetForm.purchasedCycles =
+                  count
               "
             >
-              {{ count }} 期
+              {{ count }}
+              期
             </button>
           </div>
 
@@ -1181,7 +1447,7 @@ onMounted(
                 $
                 {{
                   formatMoney(
-                    resetTotalPrice
+                    resetTotalPrice,
                   )
                 }}
               </strong>
@@ -1254,6 +1520,60 @@ onMounted(
 }
 
 /* ============================================================
+   Login
+   ============================================================ */
+
+.login-state {
+  min-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.login-state h1 {
+  margin: 13px 0 0;
+  font-size: 21px;
+}
+
+.login-state p {
+  margin: 6px 0 0;
+  color: #888888;
+  font-size: 10px;
+}
+
+.login-state button {
+  min-height: 39px;
+  margin-top: 16px;
+  padding: 0 18px;
+  border: 0;
+  background: #222222;
+  border-radius: 9px;
+  color: #ffffff;
+  font-size: 9px;
+}
+
+.login-state.error h1 {
+  color: #c94343;
+}
+
+.spinner {
+  width: 29px;
+  height: 29px;
+  border: 3px solid #dddddd;
+  border-top-color: #222222;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============================================================
    Header
    ============================================================ */
 
@@ -1297,7 +1617,7 @@ onMounted(
 }
 
 /* ============================================================
-   Sections
+   Section
    ============================================================ */
 
 .section {
@@ -1402,9 +1722,9 @@ onMounted(
 .audit-table {
   width: 100%;
   border-collapse: collapse;
+  overflow: hidden;
   background: #ffffff;
   border-radius: 13px;
-  overflow: hidden;
 }
 
 .audit-table th,
