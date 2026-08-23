@@ -8,11 +8,16 @@ import {
 
 import {
   createAuditQuery,
+  getAuditRequestMetadata,
 } from './auditService.js'
 
 import {
-  recalculatePackage,
-} from './attendanceService.js'
+  createPackageStateRecalculationQuery,
+} from './packageStateService.js'
+
+import {
+  ensureCourseSession,
+} from './courseSessionService.js'
 
 // ============================================================
 // UUID
@@ -21,15 +26,18 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-const assertUuid = (
+const normalizeUuid = (
   value,
   fieldName
 ) => {
+  const normalized =
+    String(
+      value || ''
+    ).trim()
+
   if (
     !UUID_PATTERN.test(
-      String(
-        value || ''
-      )
+      normalized
     )
   ) {
     throw createError({
@@ -39,39 +47,58 @@ const assertUuid = (
         `${fieldName} 格式不正確`,
     })
   }
+
+  return normalized
 }
 
 // ============================================================
-// Role
+// Optional UUID
 // ============================================================
 
-const normalizeActorRole = (
+const normalizeOptionalUuid = (
+  value,
+  fieldName
+) => {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return null
+  }
+
+  return normalizeUuid(
+    value,
+    fieldName
+  )
+}
+
+// ============================================================
+// Date
+// ============================================================
+
+const normalizeDate = (
   value
 ) => {
-  const role =
+  const normalized =
     String(
       value || ''
-    )
-      .trim()
-      .toUpperCase()
+    ).trim()
 
   if (
-    ![
-      'TEACHER',
-      'STUDENT',
-    ].includes(
-      role
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      normalized
     )
   ) {
     throw createError({
       statusCode: 400,
 
       statusMessage:
-        'Makeup 操作者角色不正確',
+        '補課日期格式必須為 YYYY-MM-DD',
     })
   }
 
-  return role
+  return normalized
 }
 
 // ============================================================
@@ -105,33 +132,41 @@ const normalizeNote = (
 }
 
 // ============================================================
-// Transaction
+// Role
 // ============================================================
 
-const runTransaction =
-  async (
-    sql,
-    queries
-  ) => {
-    if (
-      typeof sql.transaction !==
-      'function'
-    ) {
-      throw createError({
-        statusCode: 500,
-
-        statusMessage:
-          '目前資料庫連線不支援 Transaction',
-      })
-    }
-
-    return await sql.transaction(
-      queries
+const normalizeActorRole = (
+  value
+) => {
+  const role =
+    String(
+      value ||
+      'STUDENT'
     )
+      .trim()
+      .toUpperCase()
+
+  if (
+    ![
+      'TEACHER',
+      'STUDENT',
+    ].includes(
+      role
+    )
+  ) {
+    throw createError({
+      statusCode: 400,
+
+      statusMessage:
+        'Actor Role 不正確',
+    })
   }
 
+  return role
+}
+
 // ============================================================
-// Student
+// Require Student
 // ============================================================
 
 const requireStudent =
@@ -139,18 +174,14 @@ const requireStudent =
     sql,
     studentId
   ) => {
-    assertUuid(
-      studentId,
-      '學生 ID'
-    )
-
-    const students =
+    const rows =
       await sql`
         SELECT
           id,
+          user_id,
           name,
-          status,
-          user_id
+          note,
+          status
 
         FROM
           students
@@ -163,7 +194,7 @@ const requireStudent =
       `
 
     if (
-      !students.length
+      !rows.length
     ) {
       throw createError({
         statusCode: 404,
@@ -173,88 +204,89 @@ const requireStudent =
       })
     }
 
-    if (
-      students[0].status !==
-      'ACTIVE'
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          '學生目前不是 ACTIVE 狀態',
-      })
-    }
-
-    return students[0]
+    return rows[0]
   }
 
 // ============================================================
-// Source Leave Attendance
+// Source Leave
 // ============================================================
 
 const requireSourceLeave =
   async (
     sql,
-    studentId,
-    attendanceId
+    {
+      studentId,
+      sourceLeaveAttendanceId,
+    }
   ) => {
-    assertUuid(
-      attendanceId,
-      '請假 Attendance ID'
-    )
-
-    const records =
+    const rows =
       await sql`
         SELECT
-          attendance.*,
+          attendance.id,
 
-          session.schedule_id
-            AS source_schedule_id,
+          attendance.student_id,
 
-          session.class_date
-            AS source_class_date,
+          attendance.package_id,
 
-          session.start_time
-            AS source_start_time,
+          attendance.session_id,
 
-          schedule.course_id,
+          attendance.status,
 
-          schedule.name
-            AS source_schedule_name,
+          attendance.attendance_type,
+
+          attendance.note,
+
+          attendance.created_at,
+
+          attendance.updated_at,
+
+          session.class_date,
+
+          session.start_time,
+
+          session.end_time,
+
+          session.status
+            AS session_status,
+
+          COALESCE(
+            session.course_id,
+            schedule.course_id
+          )
+            AS course_id,
 
           course.name
             AS course_name,
 
-          package.cycle_no
-            AS package_cycle_no,
+          course.weekday,
 
           package.total_sessions,
 
           package.status
             AS package_status,
 
-          EXISTS (
-            SELECT
-              1
+          package.start_date
+            AS package_start_date,
 
-            FROM
-              leave_batch_items item
+          COALESCE(
+            (
+              SELECT
+                COUNT(*)::INTEGER
 
-            INNER JOIN
-              leave_batches batch
+              FROM
+                attendance_records_v2 usage
 
-              ON batch.id =
-                item.batch_id
+              WHERE
+                usage.package_id =
+                  attendance.package_id
 
-            WHERE
-              item.attendance_id =
-                attendance.id
-
-              AND
-                batch.status =
-                  'ACTIVE'
+                AND
+                  usage.status =
+                    'ATTENDED'
+            ),
+            0
           )
-            AS has_active_leave_batch
+            AS used_sessions
 
         FROM
           attendance_records_v2 attendance
@@ -265,7 +297,7 @@ const requireSourceLeave =
           ON session.id =
             attendance.session_id
 
-        INNER JOIN
+        LEFT JOIN
           class_schedules schedule
 
           ON schedule.id =
@@ -275,7 +307,10 @@ const requireSourceLeave =
           dance_courses course
 
           ON course.id =
-            schedule.course_id
+            COALESCE(
+              session.course_id,
+              schedule.course_id
+            )
 
         LEFT JOIN
           student_packages package
@@ -285,7 +320,7 @@ const requireSourceLeave =
 
         WHERE
           attendance.id =
-            ${attendanceId}
+            ${sourceLeaveAttendanceId}
 
           AND
             attendance.student_id =
@@ -295,65 +330,109 @@ const requireSourceLeave =
       `
 
     if (
-      !records.length
+      !rows.length
     ) {
       throw createError({
         statusCode: 404,
 
         statusMessage:
-          '找不到這筆請假紀錄',
+          '找不到原始請假紀錄',
       })
     }
 
-    const record =
-      records[0]
+    const source =
+      rows[0]
 
     if (
-      record.status !==
+      source.status !==
       'LEAVE'
     ) {
       throw createError({
         statusCode: 409,
 
         statusMessage:
-          '只有目前狀態為 LEAVE 的紀錄可以建立補課',
+          '只有目前狀態仍為請假的紀錄可以建立補課',
       })
     }
 
     if (
-      !record.package_id
+      source.attendance_type ===
+      'MAKEUP'
     ) {
       throw createError({
         statusCode: 409,
 
         statusMessage:
-          '這筆請假沒有綁定 Package，不能建立補課',
+          '補課產生的紀錄不能再作為另一筆補課來源',
       })
     }
 
-    return record
+    if (
+      !source.package_id
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '這筆請假沒有對應方案，無法建立補課',
+      })
+    }
+
+    if (
+      source.package_status ===
+      'CANCELLED'
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '這個方案已取消，不能建立補課',
+      })
+    }
+
+    const usedSessions =
+      Number(
+        source.used_sessions ||
+        0
+      )
+
+    const totalSessions =
+      Number(
+        source.total_sessions ||
+        0
+      )
+
+    if (
+      usedSessions >=
+      totalSessions
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '此方案堂數已全部使用完畢，不需要再建立補課',
+      })
+    }
+
+    return source
   }
 
 // ============================================================
-// Makeup Session
+// Target Session by ID
 // ============================================================
 
-const requireMakeupSession =
+const requireTargetSession =
   async (
     sql,
-    sessionId
-  ) => {
-    assertUuid(
+    {
       sessionId,
-      '補課 Session ID'
-    )
-
-    const sessions =
+      courseId,
+    }
+  ) => {
+    const rows =
       await sql`
         SELECT
           session.id,
-
-          session.schedule_id,
 
           session.class_date,
 
@@ -363,32 +442,20 @@ const requireMakeupSession =
 
           session.status,
 
-          schedule.course_id,
-
-          schedule.weekday,
-
-          schedule.name
-            AS schedule_name,
-
-          schedule.capacity,
-
-          course.name
-            AS course_name
+          COALESCE(
+            session.course_id,
+            schedule.course_id
+          )
+            AS course_id
 
         FROM
           class_sessions session
 
-        INNER JOIN
+        LEFT JOIN
           class_schedules schedule
 
           ON schedule.id =
             session.schedule_id
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            schedule.course_id
 
         WHERE
           session.id =
@@ -398,7 +465,7 @@ const requireMakeupSession =
       `
 
     if (
-      !sessions.length
+      !rows.length
     ) {
       throw createError({
         statusCode: 404,
@@ -409,17 +476,37 @@ const requireMakeupSession =
     }
 
     const session =
-      sessions[0]
+      rows[0]
 
     if (
-      session.status !==
-      'SCHEDULED'
+      String(
+        session.course_id
+      ) !==
+      String(
+        courseId
+      )
     ) {
       throw createError({
         statusCode: 409,
 
         statusMessage:
-          '補課只能選擇目前為 SCHEDULED 的課堂',
+          '補課必須選擇相同課堂',
+      })
+    }
+
+    if (
+      [
+        'TEACHER_LEAVE',
+        'CANCELLED',
+      ].includes(
+        session.status
+      )
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '目標課堂目前無法補課',
       })
     }
 
@@ -427,30 +514,29 @@ const requireMakeupSession =
   }
 
 // ============================================================
-// Enrollment
+// Active Makeup Check
 // ============================================================
 
-const requireEnrollment =
+const ensureNoActiveMakeup =
   async (
     sql,
-    studentId,
-    courseId
+    {
+      studentId,
+      sourceLeaveAttendanceId,
+      targetSessionId,
+    }
   ) => {
-    const records =
+    const sourceRows =
       await sql`
         SELECT
           id
 
         FROM
-          student_enrollments
+          makeup_records
 
         WHERE
-          student_id =
-            ${studentId}
-
-          AND
-            course_id =
-              ${courseId}
+          source_leave_attendance_id =
+            ${sourceLeaveAttendanceId}
 
           AND
             status =
@@ -460,31 +546,17 @@ const requireEnrollment =
       `
 
     if (
-      !records.length
+      sourceRows.length
     ) {
       throw createError({
         statusCode: 409,
 
         statusMessage:
-          '學生目前沒有加入這門課程',
+          '這筆請假已經有進行中的補課紀錄',
       })
     }
 
-    return records[0]
-  }
-
-// ============================================================
-// Existing Makeup
-// ============================================================
-
-const assertNoActiveMakeup =
-  async (
-    sql,
-    studentId,
-    sourceLeaveAttendanceId,
-    makeupSessionId
-  ) => {
-    const records =
+    const targetRows =
       await sql`
         SELECT
           id
@@ -493,49 +565,45 @@ const assertNoActiveMakeup =
           makeup_records
 
         WHERE
-          status =
-            'ACTIVE'
+          student_id =
+            ${studentId}
 
-          AND (
-            source_leave_attendance_id =
-              ${sourceLeaveAttendanceId}
+          AND
+            makeup_session_id =
+              ${targetSessionId}
 
-            OR (
-              student_id =
-                ${studentId}
-
-              AND
-                makeup_session_id =
-                  ${makeupSessionId}
-            )
-          )
+          AND
+            status =
+              'ACTIVE'
 
         LIMIT 1
       `
 
     if (
-      records.length
+      targetRows.length
     ) {
       throw createError({
         statusCode: 409,
 
         statusMessage:
-          '這筆請假或這堂補課已經存在有效的 Makeup 紀錄',
+          '這個日期已經有進行中的補課',
       })
     }
   }
 
 // ============================================================
-// Existing Attendance On Makeup Session
+// Target Attendance Check
 // ============================================================
 
-const assertNoAttendanceOnMakeupSession =
+const ensureNoTargetAttendance =
   async (
     sql,
-    studentId,
-    makeupSessionId
+    {
+      studentId,
+      sessionId,
+    }
   ) => {
-    const records =
+    const rows =
       await sql`
         SELECT
           id,
@@ -551,155 +619,35 @@ const assertNoAttendanceOnMakeupSession =
 
           AND
             session_id =
-              ${makeupSessionId}
+              ${sessionId}
 
         LIMIT 1
       `
 
     if (
-      records.length
+      rows.length
     ) {
       throw createError({
         statusCode: 409,
 
         statusMessage:
-          '學生在這堂補課 Session 已經有 Attendance 紀錄',
+          '這個補課日期已經存在出席紀錄',
       })
     }
   }
 
 // ============================================================
-// Package Capacity
-//
-// Makeup = ATTENDED
-// 所以一定會扣堂。
+// Get Student Makeup Data
 // ============================================================
 
-const assertPackageCapacity =
-  async (
-    sql,
-    packageId
-  ) => {
-    const records =
-      await sql`
-        SELECT
-          package.id,
-
-          package.total_sessions,
-
-          package.status,
-
-          COALESCE(
-            COUNT(attendance.id)
-              FILTER (
-                WHERE
-                  attendance.status =
-                    'ATTENDED'
-              ),
-            0
-          )::INTEGER
-            AS attended_count
-
-        FROM
-          student_packages package
-
-        LEFT JOIN
-          attendance_records_v2 attendance
-
-          ON attendance.package_id =
-            package.id
-
-        WHERE
-          package.id =
-            ${packageId}
-
-        GROUP BY
-          package.id
-
-        LIMIT 1
-      `
-
-    if (
-      !records.length
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          '找不到補課對應的 Package',
-      })
-    }
-
-    const packageData =
-      records[0]
-
-    const total =
-      Number(
-        packageData
-          .total_sessions ||
-        0
-      )
-
-    const attended =
-      Number(
-        packageData
-          .attended_count ||
-        0
-      )
-
-    if (
-      total <= 0
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          'Package 堂數設定不正確',
-      })
-    }
-
-    if (
-      attended >=
-      total
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          `此期 Package 已完成 ${attended}/${total} 堂，不能再加入補課`,
-      })
-    }
-
-    return packageData
-  }
-
-// ============================================================
-// Create Makeup
-// ============================================================
-
-export const createMakeup =
+export const getStudentMakeupData =
   async ({
     studentId,
-    sourceLeaveAttendanceId,
-    makeupSessionId,
-    note = null,
-    actorUserId,
-    actorRole,
-    auditMetadata = {},
   }) => {
-    assertUuid(
-      actorUserId,
-      '操作者 ID'
-    )
-
-    const normalizedRole =
-      normalizeActorRole(
-        actorRole
-      )
-
-    const normalizedNote =
-      normalizeNote(
-        note
+    const normalizedStudentId =
+      normalizeUuid(
+        studentId,
+        'Student ID'
       )
 
     const sql =
@@ -708,383 +656,159 @@ export const createMakeup =
     const student =
       await requireStudent(
         sql,
-        studentId
-      )
-
-    const sourceLeave =
-      await requireSourceLeave(
-        sql,
-        studentId,
-        sourceLeaveAttendanceId
-      )
-
-    const makeupSession =
-      await requireMakeupSession(
-        sql,
-        makeupSessionId
+        normalizedStudentId
       )
 
     // ========================================================
-    // 不能補原本自己那堂
+    // Eligible Leave Sources
     // ========================================================
 
-    if (
-      String(
-        sourceLeave.session_id
-      ) ===
-      String(
-        makeupSession.id
-      )
-    ) {
-      throw createError({
-        statusCode: 400,
+    const sourceLeaves =
+      await sql`
+        SELECT
+          attendance.id
+            AS attendance_id,
 
-        statusMessage:
-          '補課 Session 不能和原本請假的 Session 相同',
-      })
-    }
+          attendance.package_id,
 
-    // ========================================================
-    // 必須同 Course
-    // ========================================================
+          attendance.session_id,
 
-    if (
-      String(
-        sourceLeave.course_id
-      ) !==
-      String(
-        makeupSession.course_id
-      )
-    ) {
-      throw createError({
-        statusCode: 409,
+          attendance.status,
 
-        statusMessage:
-          `只能補同一門課程。原請假為「${sourceLeave.course_name}」，不能補到「${makeupSession.course_name}」`,
-      })
-    }
+          attendance.note,
 
-    await requireEnrollment(
-      sql,
-      studentId,
-      sourceLeave.course_id
-    )
+          session.class_date,
 
-    await assertNoActiveMakeup(
-      sql,
-      studentId,
-      sourceLeaveAttendanceId,
-      makeupSessionId
-    )
+          session.start_time,
 
-    await assertNoAttendanceOnMakeupSession(
-      sql,
-      studentId,
-      makeupSessionId
-    )
+          session.end_time,
 
-    const packageData =
-      await assertPackageCapacity(
-        sql,
-        sourceLeave.package_id
-      )
-
-    // ========================================================
-    // IDs
-    // ========================================================
-
-    const makeupId =
-      randomUUID()
-
-    const makeupAttendanceId =
-      randomUUID()
-
-    // ========================================================
-    // Attendance Snapshot
-    // ========================================================
-
-    const attendanceAfter = {
-      id:
-        makeupAttendanceId,
-
-      student_id:
-        studentId,
-
-      package_id:
-        sourceLeave.package_id,
-
-      session_id:
-        makeupSession.id,
-
-      status:
-        'ATTENDED',
-
-      attendance_type:
-        'MAKEUP',
-
-      note:
-        normalizedNote,
-    }
-
-    // ========================================================
-    // Makeup Snapshot
-    // ========================================================
-
-    const makeupAfter = {
-      id:
-        makeupId,
-
-      student_id:
-        studentId,
-
-      student_name:
-        student.name,
-
-      course_id:
-        sourceLeave.course_id,
-
-      course_name:
-        sourceLeave.course_name,
-
-      package_id:
-        sourceLeave.package_id,
-
-      package_cycle_no:
-        sourceLeave.package_cycle_no,
-
-      source_leave_attendance_id:
-        sourceLeaveAttendanceId,
-
-      source_session_id:
-        sourceLeave.session_id,
-
-      source_class_date:
-        sourceLeave.source_class_date,
-
-      makeup_session_id:
-        makeupSession.id,
-
-      makeup_class_date:
-        makeupSession.class_date,
-
-      makeup_attendance_id:
-        makeupAttendanceId,
-
-      status:
-        'ACTIVE',
-
-      note:
-        normalizedNote,
-    }
-
-    const queries = [
-      // ======================================================
-      // Makeup Attendance
-      // ======================================================
-
-      sql`
-        INSERT INTO
-          attendance_records_v2 (
-            id,
-            student_id,
-            package_id,
-            session_id,
-            status,
-            attendance_type,
-            created_by,
-            original_status,
-            cancelled_at,
-            note,
-            created_at,
-            updated_at
+          COALESCE(
+            session.course_id,
+            schedule.course_id
           )
+            AS course_id,
 
-        VALUES (
-          ${makeupAttendanceId},
-          ${studentId},
-          ${sourceLeave.package_id},
-          ${makeupSession.id},
-          'ATTENDED',
-          'MAKEUP',
-          ${actorUserId},
-          NULL,
-          NULL,
-          ${normalizedNote},
-          NOW(),
-          NOW()
-        )
+          course.name
+            AS course_name,
 
-        RETURNING
-          *
-      `,
+          course.weekday,
 
-      // ======================================================
-      // Makeup Record
-      // ======================================================
+          package.total_sessions,
 
-      sql`
-        INSERT INTO
-          makeup_records (
-            id,
-            student_id,
-            course_id,
-            package_id,
-            source_leave_attendance_id,
-            source_session_id,
-            makeup_session_id,
-            makeup_attendance_id,
-            status,
-            note,
-            created_by,
-            cancelled_at,
-            created_at,
-            updated_at
+          package.status
+            AS package_status,
+
+          COALESCE(
+            (
+              SELECT
+                COUNT(*)::INTEGER
+
+              FROM
+                attendance_records_v2 usage
+
+              WHERE
+                usage.package_id =
+                  attendance.package_id
+
+                AND
+                  usage.status =
+                    'ATTENDED'
+            ),
+            0
           )
+            AS used_sessions,
 
-        VALUES (
-          ${makeupId},
-          ${studentId},
-          ${sourceLeave.course_id},
-          ${sourceLeave.package_id},
-          ${sourceLeaveAttendanceId},
-          ${sourceLeave.session_id},
-          ${makeupSession.id},
-          ${makeupAttendanceId},
-          'ACTIVE',
-          ${normalizedNote},
-          ${actorUserId},
-          NULL,
-          NOW(),
-          NOW()
-        )
+          EXISTS (
+            SELECT
+              1
 
-        RETURNING
-          *
-      `,
+            FROM
+              makeup_records existing_makeup
 
-      // ======================================================
-      // Attendance Audit
-      // ======================================================
+            WHERE
+              existing_makeup
+                .source_leave_attendance_id =
+                  attendance.id
 
-      createAuditQuery(
-        sql,
-        {
-          actorUserId,
+              AND
+                existing_makeup.status =
+                  'ACTIVE'
+          )
+            AS has_active_makeup
 
-          actorRole:
-            normalizedRole,
+        FROM
+          attendance_records_v2 attendance
 
-          action:
-            'CREATE',
+        INNER JOIN
+          class_sessions session
 
-          entityType:
-            'ATTENDANCE',
+          ON session.id =
+            attendance.session_id
 
-          entityId:
-            makeupAttendanceId,
+        LEFT JOIN
+          class_schedules schedule
 
-          studentId,
+          ON schedule.id =
+            session.schedule_id
 
-          courseId:
-            sourceLeave.course_id,
+        INNER JOIN
+          dance_courses course
 
-          sessionId:
-            makeupSession.id,
+          ON course.id =
+            COALESCE(
+              session.course_id,
+              schedule.course_id
+            )
 
-          beforeData:
-            null,
+        INNER JOIN
+          student_packages package
 
-          afterData:
-            attendanceAfter,
+          ON package.id =
+            attendance.package_id
 
-          note:
-            `建立補課 Attendance：${sourceLeave.course_name}`,
+        WHERE
+          attendance.student_id =
+            ${normalizedStudentId}
 
-          ...auditMetadata,
-        }
-      ),
+          AND
+            attendance.status =
+              'LEAVE'
 
-      // ======================================================
-      // Makeup Audit
-      // ======================================================
+          AND
+            attendance.attendance_type <>
+              'MAKEUP'
 
-      createAuditQuery(
-        sql,
-        {
-          actorUserId,
+          AND
+            package.status <>
+              'CANCELLED'
 
-          actorRole:
-            normalizedRole,
-
-          action:
-            'CREATE',
-
-          entityType:
-            'MAKEUP',
-
-          entityId:
-            makeupId,
-
-          studentId,
-
-          courseId:
-            sourceLeave.course_id,
-
-          sessionId:
-            makeupSession.id,
-
-          beforeData:
-            null,
-
-          afterData:
-            makeupAfter,
-
-          note:
-            `建立補課：${String(sourceLeave.source_class_date).slice(0, 10)} → ${String(makeupSession.class_date).slice(0, 10)}`,
-
-          ...auditMetadata,
-        }
-      ),
-    ]
-
-    const results =
-      await runTransaction(
-        sql,
-        queries
-      )
+        ORDER BY
+          session.class_date DESC,
+          session.start_time DESC
+      `
 
     // ========================================================
-    // Makeup Attendance = ATTENDED
-    //
-    // 所以補課建立後，要重新計算原 Package。
+    // Makeup History
     // ========================================================
 
-    const recalculatedPackage =
-      await recalculatePackage(
-        sql,
-        sourceLeave.package_id
-      )
+    const makeups =
+      await getTeacherMakeups({
+        studentId:
+          normalizedStudentId,
+      })
 
     return {
-      makeup:
-        results[1]?.[0] ||
-        null,
+      student,
 
-      attendance:
-        results[0]?.[0] ||
-        null,
+      sourceLeaves,
 
-      package:
-        recalculatedPackage,
-
-      sourceLeave,
-
-      makeupSession,
+      makeups,
     }
   }
 
 // ============================================================
-// Teacher Makeup Page Data
+// Teacher / Shared Query
 // ============================================================
 
 export const getTeacherMakeups =
@@ -1092,41 +816,24 @@ export const getTeacherMakeups =
     studentId = null,
     courseId = null,
     status = null,
+    startDate = null,
+    endDate = null,
   } = {}) => {
-    const sql =
-      useDatabase()
-
     const normalizedStudentId =
       studentId
-        ? String(
-            studentId
-          ).trim()
+        ? normalizeUuid(
+            studentId,
+            'Student ID'
+          )
         : null
 
     const normalizedCourseId =
       courseId
-        ? String(
-            courseId
-          ).trim()
+        ? normalizeUuid(
+            courseId,
+            'Course ID'
+          )
         : null
-
-    if (
-      normalizedStudentId
-    ) {
-      assertUuid(
-        normalizedStudentId,
-        '學生 ID'
-      )
-    }
-
-    if (
-      normalizedCourseId
-    ) {
-      assertUuid(
-        normalizedCourseId,
-        'Course ID'
-      )
-    }
 
     const normalizedStatus =
       status
@@ -1135,6 +842,20 @@ export const getTeacherMakeups =
           )
             .trim()
             .toUpperCase()
+        : null
+
+    const normalizedStartDate =
+      startDate
+        ? normalizeDate(
+            startDate
+          )
+        : null
+
+    const normalizedEndDate =
+      endDate
+        ? normalizeDate(
+            endDate
+          )
         : null
 
     if (
@@ -1150,703 +871,767 @@ export const getTeacherMakeups =
         statusCode: 400,
 
         statusMessage:
-          'Makeup status 不正確',
+          '補課狀態不正確',
       })
     }
-
-    // ========================================================
-    // Makeup Records
-    // ========================================================
-
-    const makeups =
-      await sql`
-        SELECT
-          makeup.*,
-
-          student.name
-            AS student_name,
-
-          course.name
-            AS course_name,
-
-          package.cycle_no
-            AS package_cycle_no,
-
-          source_session.class_date
-            AS source_class_date,
-
-          source_session.start_time
-            AS source_start_time,
-
-          source_schedule.name
-            AS source_schedule_name,
-
-          makeup_session.class_date
-            AS makeup_class_date,
-
-          makeup_session.start_time
-            AS makeup_start_time,
-
-          makeup_session.end_time
-            AS makeup_end_time,
-
-          makeup_schedule.name
-            AS makeup_schedule_name,
-
-          makeup_attendance.status
-            AS makeup_attendance_status,
-
-          creator.role
-            AS created_by_role,
-
-          creator.display_name
-            AS created_by_name
-
-        FROM
-          makeup_records makeup
-
-        INNER JOIN
-          students student
-
-          ON student.id =
-            makeup.student_id
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            makeup.course_id
-
-        INNER JOIN
-          student_packages package
-
-          ON package.id =
-            makeup.package_id
-
-        INNER JOIN
-          class_sessions source_session
-
-          ON source_session.id =
-            makeup.source_session_id
-
-        INNER JOIN
-          class_schedules source_schedule
-
-          ON source_schedule.id =
-            source_session.schedule_id
-
-        INNER JOIN
-          class_sessions makeup_session
-
-          ON makeup_session.id =
-            makeup.makeup_session_id
-
-        INNER JOIN
-          class_schedules makeup_schedule
-
-          ON makeup_schedule.id =
-            makeup_session.schedule_id
-
-        LEFT JOIN
-          attendance_records_v2 makeup_attendance
-
-          ON makeup_attendance.id =
-            makeup.makeup_attendance_id
-
-        LEFT JOIN
-          app_users creator
-
-          ON creator.id =
-            makeup.created_by
-
-        WHERE
-          (
-            ${normalizedStudentId}::uuid
-              IS NULL
-
-            OR
-              makeup.student_id =
-                ${normalizedStudentId}
-          )
-
-          AND (
-            ${normalizedCourseId}::uuid
-              IS NULL
-
-            OR
-              makeup.course_id =
-                ${normalizedCourseId}
-          )
-
-          AND (
-            ${normalizedStatus}::text
-              IS NULL
-
-            OR
-              makeup.status =
-                ${normalizedStatus}
-          )
-
-        ORDER BY
-          makeup.created_at DESC
-      `
-
-    // ========================================================
-    // Students
-    // ========================================================
-
-    const students =
-      await sql`
-        SELECT
-          id,
-          name
-
-        FROM
-          students
-
-        WHERE
-          status =
-            'ACTIVE'
-
-        ORDER BY
-          name ASC
-      `
-
-    // ========================================================
-    // Courses
-    // ========================================================
-
-    const courses =
-      await sql`
-        SELECT
-          id,
-          name
-
-        FROM
-          dance_courses
-
-        WHERE
-          status =
-            'ACTIVE'
-
-        ORDER BY
-          name ASC
-      `
-
-    // ========================================================
-    // 可作為補課來源的 LEAVE
-    // ========================================================
-
-    const leaves =
-      await sql`
-        SELECT
-          attendance.id
-            AS attendance_id,
-
-          attendance.student_id,
-
-          student.name
-            AS student_name,
-
-          attendance.package_id,
-
-          package.cycle_no
-            AS package_cycle_no,
-
-          session.id
-            AS session_id,
-
-          session.class_date,
-
-          session.start_time,
-
-          schedule.id
-            AS schedule_id,
-
-          schedule.course_id,
-
-          schedule.name
-            AS schedule_name,
-
-          course.name
-            AS course_name
-
-        FROM
-          attendance_records_v2 attendance
-
-        INNER JOIN
-          students student
-
-          ON student.id =
-            attendance.student_id
-
-        INNER JOIN
-          class_sessions session
-
-          ON session.id =
-            attendance.session_id
-
-        INNER JOIN
-          class_schedules schedule
-
-          ON schedule.id =
-            session.schedule_id
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            schedule.course_id
-
-        LEFT JOIN
-          student_packages package
-
-          ON package.id =
-            attendance.package_id
-
-        WHERE
-          attendance.status =
-            'LEAVE'
-
-          AND
-            attendance.package_id
-              IS NOT NULL
-
-          AND NOT EXISTS (
-            SELECT
-              1
-
-            FROM
-              makeup_records existing_makeup
-
-            WHERE
-              existing_makeup.source_leave_attendance_id =
-                attendance.id
-
-              AND
-                existing_makeup.status =
-                  'ACTIVE'
-          )
-
-        ORDER BY
-          session.class_date DESC,
-          student.name ASC
-      `
-
-    // ========================================================
-    // 可補課 Session
-    //
-    // Service 實際建立時仍會再次檢查同 Course。
-    // ========================================================
-
-    const sessions =
-      await sql`
-        SELECT
-          session.id,
-
-          session.schedule_id,
-
-          session.class_date,
-
-          session.start_time,
-
-          session.end_time,
-
-          session.status,
-
-          schedule.course_id,
-
-          schedule.weekday,
-
-          schedule.name
-            AS schedule_name,
-
-          course.name
-            AS course_name
-
-        FROM
-          class_sessions session
-
-        INNER JOIN
-          class_schedules schedule
-
-          ON schedule.id =
-            session.schedule_id
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            schedule.course_id
-
-        WHERE
-          session.status =
-            'SCHEDULED'
-
-          AND
-            session.class_date >=
-              CURRENT_DATE -
-              INTERVAL '30 days'
-
-          AND
-            session.class_date <=
-              CURRENT_DATE +
-              INTERVAL '365 days'
-
-        ORDER BY
-          session.class_date ASC,
-          session.start_time ASC
-      `
-
-    return {
-      makeups,
-      students,
-      courses,
-      leaves,
-      sessions,
-    }
-  }
-
-// ============================================================
-// Student Makeup Page Data
-// ============================================================
-
-export const getStudentMakeupData =
-  async (
-    studentId
-  ) => {
-    assertUuid(
-      studentId,
-      '學生 ID'
-    )
 
     const sql =
       useDatabase()
 
-    await requireStudent(
+    return await sql`
+      SELECT
+        makeup.id,
+
+        makeup.student_id,
+
+        makeup.course_id,
+
+        makeup.package_id,
+
+        makeup.source_leave_attendance_id,
+
+        makeup.source_session_id,
+
+        makeup.makeup_session_id,
+
+        makeup.makeup_attendance_id,
+
+        makeup.status,
+
+        makeup.note,
+
+        makeup.created_by,
+
+        makeup.linked_attendance_synced_at,
+
+        makeup.cancelled_at,
+
+        makeup.cancelled_by,
+
+        makeup.cancellation_reason,
+
+        makeup.restored_at,
+
+        makeup.restored_by,
+
+        makeup.created_at,
+
+        makeup.updated_at,
+
+        student.name
+          AS student_name,
+
+        course.name
+          AS course_name,
+
+        source_session.class_date
+          AS source_class_date,
+
+        source_session.start_time
+          AS source_start_time,
+
+        target_session.class_date
+          AS makeup_class_date,
+
+        target_session.start_time
+          AS makeup_start_time,
+
+        target_session.end_time
+          AS makeup_end_time,
+
+        target_attendance.status
+          AS makeup_attendance_status,
+
+        target_attendance.attendance_type
+          AS makeup_attendance_type,
+
+        target_attendance.note
+          AS makeup_attendance_note,
+
+        target_attendance.updated_at
+          AS makeup_attendance_updated_at,
+
+        package.total_sessions,
+
+        package.status
+          AS package_status,
+
+        COALESCE(
+          (
+            SELECT
+              COUNT(*)::INTEGER
+
+            FROM
+              attendance_records_v2 usage
+
+            WHERE
+              usage.package_id =
+                makeup.package_id
+
+              AND
+                usage.status =
+                  'ATTENDED'
+          ),
+          0
+        )
+          AS used_sessions
+
+      FROM
+        makeup_records makeup
+
+      INNER JOIN
+        students student
+
+        ON student.id =
+          makeup.student_id
+
+      INNER JOIN
+        dance_courses course
+
+        ON course.id =
+          makeup.course_id
+
+      INNER JOIN
+        student_packages package
+
+        ON package.id =
+          makeup.package_id
+
+      INNER JOIN
+        class_sessions source_session
+
+        ON source_session.id =
+          makeup.source_session_id
+
+      INNER JOIN
+        class_sessions target_session
+
+        ON target_session.id =
+          makeup.makeup_session_id
+
+      LEFT JOIN
+        attendance_records_v2 target_attendance
+
+        ON target_attendance.id =
+          makeup.makeup_attendance_id
+
+      WHERE
+        (
+          ${normalizedStudentId}::uuid
+            IS NULL
+
+          OR
+            makeup.student_id =
+              ${normalizedStudentId}
+        )
+
+        AND (
+          ${normalizedCourseId}::uuid
+            IS NULL
+
+          OR
+            makeup.course_id =
+              ${normalizedCourseId}
+        )
+
+        AND (
+          ${normalizedStatus}::text
+            IS NULL
+
+          OR
+            makeup.status =
+              ${normalizedStatus}
+        )
+
+        AND (
+          ${normalizedStartDate}::date
+            IS NULL
+
+          OR
+            target_session.class_date >=
+              ${normalizedStartDate}
+        )
+
+        AND (
+          ${normalizedEndDate}::date
+            IS NULL
+
+          OR
+            target_session.class_date <=
+              ${normalizedEndDate}
+        )
+
+      ORDER BY
+        target_session.class_date DESC,
+        makeup.created_at DESC
+    `
+  }
+
+// ============================================================
+// Create Makeup
+//
+// 支援：
+//
+// makeupDate
+//
+// 或舊 API：
+//
+// makeupSessionId
+// ============================================================
+
+export const createMakeup =
+  async ({
+    studentId,
+
+    sourceLeaveAttendanceId,
+
+    makeupDate = null,
+
+    makeupSessionId = null,
+
+    note = null,
+
+    actorUserId,
+
+    actorRole = 'STUDENT',
+
+    event = null,
+  }) => {
+    const normalizedStudentId =
+      normalizeUuid(
+        studentId,
+        'Student ID'
+      )
+
+    const normalizedSourceId =
+      normalizeUuid(
+        sourceLeaveAttendanceId,
+        'Source Leave Attendance ID'
+      )
+
+    const normalizedActorId =
+      normalizeUuid(
+        actorUserId,
+        'Actor User ID'
+      )
+
+    const normalizedTargetSessionId =
+      normalizeOptionalUuid(
+        makeupSessionId,
+        'Makeup Session ID'
+      )
+
+    const normalizedMakeupDate =
+      makeupDate
+        ? normalizeDate(
+            makeupDate
+          )
+        : null
+
+    const normalizedRole =
+      normalizeActorRole(
+        actorRole
+      )
+
+    const normalizedNote =
+      normalizeNote(
+        note
+      )
+
+    if (
+      !normalizedTargetSessionId &&
+      !normalizedMakeupDate
+    ) {
+      throw createError({
+        statusCode: 400,
+
+        statusMessage:
+          '請選擇補課日期',
+      })
+    }
+
+    const sql =
+      useDatabase()
+
+    const student =
+      await requireStudent(
+        sql,
+        normalizedStudentId
+      )
+
+    if (
+      student.status !==
+      'ACTIVE'
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '學生目前已停用',
+      })
+    }
+
+    // ========================================================
+    // Source Leave
+    // ========================================================
+
+    const source =
+      await requireSourceLeave(
+        sql,
+        {
+          studentId:
+            normalizedStudentId,
+
+          sourceLeaveAttendanceId:
+            normalizedSourceId,
+        }
+      )
+
+    // ========================================================
+    // Target Session
+    // ========================================================
+
+    let targetSession
+
+    if (
+      normalizedTargetSessionId
+    ) {
+      targetSession =
+        await requireTargetSession(
+          sql,
+          {
+            sessionId:
+              normalizedTargetSessionId,
+
+            courseId:
+              source.course_id,
+          }
+        )
+    } else {
+      const ensured =
+        await ensureCourseSession({
+          courseId:
+            source.course_id,
+
+          classDate:
+            normalizedMakeupDate,
+        })
+
+      targetSession =
+        ensured.session
+    }
+
+    // ========================================================
+    // Source != Target
+    // ========================================================
+
+    if (
+      String(
+        targetSession.id
+      ) ===
+      String(
+        source.session_id
+      )
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '補課日期不能和原本請假的課堂相同',
+      })
+    }
+
+    // ========================================================
+    // Target Session Status
+    // ========================================================
+
+    if (
+      [
+        'TEACHER_LEAVE',
+        'CANCELLED',
+      ].includes(
+        targetSession.status
+      )
+    ) {
+      throw createError({
+        statusCode: 409,
+
+        statusMessage:
+          '這個補課日期目前不能上課',
+      })
+    }
+
+    // ========================================================
+    // Existing Makeup
+    // ========================================================
+
+    await ensureNoActiveMakeup(
       sql,
-      studentId
+      {
+        studentId:
+          normalizedStudentId,
+
+        sourceLeaveAttendanceId:
+          normalizedSourceId,
+
+        targetSessionId:
+          targetSession.id,
+      }
     )
 
     // ========================================================
-    // Existing Makeups
+    // Target Attendance
     // ========================================================
 
-    const makeups =
-      await sql`
-        SELECT
-          makeup.*,
+    await ensureNoTargetAttendance(
+      sql,
+      {
+        studentId:
+          normalizedStudentId,
 
-          course.name
-            AS course_name,
-
-          package.cycle_no
-            AS package_cycle_no,
-
-          source_session.class_date
-            AS source_class_date,
-
-          source_session.start_time
-            AS source_start_time,
-
-          source_schedule.name
-            AS source_schedule_name,
-
-          makeup_session.class_date
-            AS makeup_class_date,
-
-          makeup_session.start_time
-            AS makeup_start_time,
-
-          makeup_session.end_time
-            AS makeup_end_time,
-
-          makeup_schedule.name
-            AS makeup_schedule_name,
-
-          attendance.status
-            AS makeup_attendance_status
-
-        FROM
-          makeup_records makeup
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            makeup.course_id
-
-        INNER JOIN
-          student_packages package
-
-          ON package.id =
-            makeup.package_id
-
-        INNER JOIN
-          class_sessions source_session
-
-          ON source_session.id =
-            makeup.source_session_id
-
-        INNER JOIN
-          class_schedules source_schedule
-
-          ON source_schedule.id =
-            source_session.schedule_id
-
-        INNER JOIN
-          class_sessions makeup_session
-
-          ON makeup_session.id =
-            makeup.makeup_session_id
-
-        INNER JOIN
-          class_schedules makeup_schedule
-
-          ON makeup_schedule.id =
-            makeup_session.schedule_id
-
-        LEFT JOIN
-          attendance_records_v2 attendance
-
-          ON attendance.id =
-            makeup.makeup_attendance_id
-
-        WHERE
-          makeup.student_id =
-            ${studentId}
-
-        ORDER BY
-          makeup.created_at DESC
-      `
+        sessionId:
+          targetSession.id,
+      }
+    )
 
     // ========================================================
-    // Eligible Leaves
+    // IDs
     // ========================================================
 
-    const leaves =
-      await sql`
-        SELECT
-          attendance.id
-            AS attendance_id,
+    const makeupId =
+      randomUUID()
 
-          attendance.package_id,
+    const makeupAttendanceId =
+      randomUUID()
 
-          package.cycle_no
-            AS package_cycle_no,
+    // ========================================================
+    // Audit
+    // ========================================================
 
-          session.id
-            AS session_id,
+    const afterData = {
+      id:
+        makeupId,
 
-          session.class_date,
+      student_id:
+        normalizedStudentId,
 
-          session.start_time,
+      course_id:
+        source.course_id,
 
-          schedule.course_id,
+      package_id:
+        source.package_id,
 
-          schedule.name
-            AS schedule_name,
+      source_leave_attendance_id:
+        normalizedSourceId,
 
-          course.name
-            AS course_name
+      source_session_id:
+        source.session_id,
 
-        FROM
-          attendance_records_v2 attendance
+      makeup_session_id:
+        targetSession.id,
 
-        INNER JOIN
-          class_sessions session
+      makeup_attendance_id:
+        makeupAttendanceId,
 
-          ON session.id =
-            attendance.session_id
+      status:
+        'ACTIVE',
 
-        INNER JOIN
-          class_schedules schedule
+      note:
+        normalizedNote,
+    }
 
-          ON schedule.id =
-            session.schedule_id
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            schedule.course_id
-
-        LEFT JOIN
-          student_packages package
-
-          ON package.id =
-            attendance.package_id
-
-        WHERE
-          attendance.student_id =
-            ${studentId}
-
-          AND
-            attendance.status =
-              'LEAVE'
-
-          AND
-            attendance.package_id
-              IS NOT NULL
-
-          AND NOT EXISTS (
-            SELECT
-              1
-
-            FROM
-              makeup_records makeup
-
-            WHERE
-              makeup.source_leave_attendance_id =
-                attendance.id
-
-              AND
-                makeup.status =
-                  'ACTIVE'
+    const auditMetadata =
+      event
+        ? getAuditRequestMetadata(
+            event
           )
-
-        ORDER BY
-          session.class_date DESC
-      `
+        : {}
 
     // ========================================================
-    // Candidate Makeup Sessions
+    // Attendance
     //
-    // 只限學生有 ACTIVE Enrollment 的 Course。
+    // DB Trigger 會再次確認：
+    //
+    // used_sessions < total_sessions
+    //
+    // 並 Lock Package。
     // ========================================================
 
-    const sessions =
-      await sql`
-        SELECT
-          session.id,
+    const attendanceQuery =
+      sql`
+        INSERT INTO
+          attendance_records_v2 (
+            id,
 
-          session.schedule_id,
+            student_id,
 
-          session.class_date,
+            package_id,
 
-          session.start_time,
+            session_id,
 
-          session.end_time,
+            status,
 
-          schedule.course_id,
+            attendance_type,
 
-          schedule.weekday,
+            created_by,
 
-          schedule.name
-            AS schedule_name,
+            original_status,
 
-          course.name
-            AS course_name,
+            cancelled_at,
 
-          EXISTS (
-            SELECT
-              1
+            note,
 
-            FROM
-              student_enrollment_schedules
-                enrollment_schedule
+            created_at,
 
-            INNER JOIN
-              student_enrollments enrollment
-
-              ON enrollment.id =
-                enrollment_schedule.enrollment_id
-
-            WHERE
-              enrollment.student_id =
-                ${studentId}
-
-              AND
-                enrollment.course_id =
-                  schedule.course_id
-
-              AND
-                enrollment_schedule.schedule_id =
-                  schedule.id
-
-              AND
-                enrollment.status =
-                  'ACTIVE'
-
-              AND
-                enrollment_schedule.status =
-                  'ACTIVE'
-          )
-            AS is_fixed_schedule
-
-        FROM
-          class_sessions session
-
-        INNER JOIN
-          class_schedules schedule
-
-          ON schedule.id =
-            session.schedule_id
-
-        INNER JOIN
-          dance_courses course
-
-          ON course.id =
-            schedule.course_id
-
-        WHERE
-          session.status =
-            'SCHEDULED'
-
-          AND
-            session.class_date >=
-              CURRENT_DATE -
-              INTERVAL '30 days'
-
-          AND
-            session.class_date <=
-              CURRENT_DATE +
-              INTERVAL '365 days'
-
-          AND EXISTS (
-            SELECT
-              1
-
-            FROM
-              student_enrollments enrollment
-
-            WHERE
-              enrollment.student_id =
-                ${studentId}
-
-              AND
-                enrollment.course_id =
-                  schedule.course_id
-
-              AND
-                enrollment.status =
-                  'ACTIVE'
+            updated_at
           )
 
-          AND NOT EXISTS (
-            SELECT
-              1
+        VALUES (
+          ${makeupAttendanceId},
 
-            FROM
-              attendance_records_v2 existing_attendance
+          ${normalizedStudentId},
 
-            WHERE
-              existing_attendance.student_id =
-                ${studentId}
+          ${source.package_id},
 
-              AND
-                existing_attendance.session_id =
-                  session.id
-          )
+          ${targetSession.id},
 
-        ORDER BY
-          session.class_date ASC,
-          session.start_time ASC
+          'ATTENDED',
+
+          'MAKEUP',
+
+          ${normalizedActorId},
+
+          NULL,
+
+          NULL,
+
+          ${normalizedNote},
+
+          NOW(),
+
+          NOW()
+        )
+
+        RETURNING
+          *
       `
+
+    // ========================================================
+    // Makeup
+    // ========================================================
+
+    const makeupQuery =
+      sql`
+        INSERT INTO
+          makeup_records (
+            id,
+
+            student_id,
+
+            course_id,
+
+            package_id,
+
+            source_leave_attendance_id,
+
+            source_session_id,
+
+            makeup_session_id,
+
+            makeup_attendance_id,
+
+            status,
+
+            note,
+
+            created_by,
+
+            linked_attendance_synced_at,
+
+            cancelled_at,
+
+            cancelled_by,
+
+            cancellation_reason,
+
+            restored_at,
+
+            restored_by,
+
+            created_at,
+
+            updated_at
+          )
+
+        VALUES (
+          ${makeupId},
+
+          ${normalizedStudentId},
+
+          ${source.course_id},
+
+          ${source.package_id},
+
+          ${normalizedSourceId},
+
+          ${source.session_id},
+
+          ${targetSession.id},
+
+          ${makeupAttendanceId},
+
+          'ACTIVE',
+
+          ${normalizedNote},
+
+          ${normalizedActorId},
+
+          NOW(),
+
+          NULL,
+
+          NULL,
+
+          NULL,
+
+          NULL,
+
+          NULL,
+
+          NOW(),
+
+          NOW()
+        )
+
+        RETURNING
+          *
+      `
+
+    // ========================================================
+    // Audit
+    // ========================================================
+
+    const auditQuery =
+      createAuditQuery(
+        sql,
+        {
+          actorUserId:
+            normalizedActorId,
+
+          actorRole:
+            normalizedRole,
+
+          action:
+            'CREATE',
+
+          entityType:
+            'MAKEUP',
+
+          entityId:
+            makeupId,
+
+          studentId:
+            normalizedStudentId,
+
+          courseId:
+            source.course_id,
+
+          beforeData:
+            null,
+
+          afterData,
+
+          note:
+            `${student.name}｜${source.course_name}｜${String(source.class_date).slice(0, 10)} 請假 → ${String(targetSession.class_date).slice(0, 10)} 補課`,
+
+          ...auditMetadata,
+        }
+      )
+
+    // ========================================================
+    // Package recalculation
+    // ========================================================
+
+    const packageQuery =
+      createPackageStateRecalculationQuery(
+        sql,
+        source.package_id
+      )
+
+    if (
+      typeof sql.transaction !==
+      'function'
+    ) {
+      throw createError({
+        statusCode: 500,
+
+        statusMessage:
+          '目前資料庫連線不支援 Transaction',
+      })
+    }
+
+    let results
+
+    try {
+      results =
+        await sql.transaction([
+          attendanceQuery,
+          makeupQuery,
+          auditQuery,
+          packageQuery,
+        ])
+    } catch (
+      error
+    ) {
+      const message =
+        String(
+          error?.message ||
+          ''
+        )
+
+      if (
+        message.includes(
+          'PACKAGE_SESSION_LIMIT_REACHED'
+        )
+      ) {
+        throw createError({
+          statusCode: 409,
+
+          statusMessage:
+            '此方案堂數已全部使用完畢，不能再建立補課',
+        })
+      }
+
+      if (
+        error?.code ===
+        '23505'
+      ) {
+        throw createError({
+          statusCode: 409,
+
+          statusMessage:
+            '這筆請假或補課日期已存在補課紀錄，請重新整理',
+        })
+      }
+
+      throw error
+    }
 
     return {
-      makeups,
-      leaves,
-      sessions,
+      attendance:
+        results[0]?.[0] ||
+        null,
+
+      makeup:
+        results[1]?.[0] ||
+        null,
+
+      package:
+        results[3]?.[0] ||
+        null,
+
+      source,
+
+      targetSession,
     }
   }

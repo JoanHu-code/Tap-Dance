@@ -14,9 +14,6 @@ const loading =
 const creating =
   ref(false)
 
-const actionLoadingId =
-  ref(null)
-
 const errorMessage =
   ref('')
 
@@ -26,55 +23,172 @@ const successMessage =
 const student =
   ref(null)
 
+const sourceLeaves =
+  ref([])
+
 const makeups =
   ref([])
 
-const leaves =
-  ref([])
-
-const sessions =
-  ref([])
-
-const summary =
-  ref({
-    total: 0,
-    active: 0,
-    cancelled: 0,
-    availableLeaves: 0,
-  })
-
-const showCreateDialog =
+const showCreate =
   ref(false)
 
-let toastTimer =
-  null
-
 // ============================================================
-// Toast
+// Saving IDs
 // ============================================================
 
-const showSuccess = (
-  message
+const savingIds =
+  ref(
+    new Set()
+  )
+
+const isSaving = (
+  id
 ) => {
-  successMessage.value =
-    message
-
-  if (
-    toastTimer
-  ) {
-    window.clearTimeout(
-      toastTimer
+  return savingIds.value.has(
+    String(
+      id
     )
+  )
+}
+
+// ============================================================
+// Taipei Today
+// ============================================================
+
+const getTaipeiToday =
+  () => {
+    return new Intl
+      .DateTimeFormat(
+        'en-CA',
+        {
+          timeZone:
+            'Asia/Taipei',
+
+          year:
+            'numeric',
+
+          month:
+            '2-digit',
+
+          day:
+            '2-digit',
+        }
+      )
+      .format(
+        new Date()
+      )
   }
 
-  toastTimer =
-    window.setTimeout(
-      () => {
-        successMessage.value =
-          ''
-      },
-      2500
+// ============================================================
+// Form
+// ============================================================
+
+const form =
+  reactive({
+    sourceLeaveAttendanceId:
+      '',
+
+    makeupDate:
+      getTaipeiToday(),
+
+    note:
+      '',
+  })
+
+// ============================================================
+// Selected Leave
+// ============================================================
+
+const selectedLeave =
+  computed(() => {
+    return (
+      sourceLeaves.value.find(
+        (
+          item
+        ) => {
+          return (
+            String(
+              item.attendance_id
+            ) ===
+            String(
+              form
+                .sourceLeaveAttendanceId
+            )
+          )
+        }
+      ) ||
+      null
     )
+  })
+
+// ============================================================
+// Available Leaves
+// ============================================================
+
+const availableLeaves =
+  computed(() => {
+    return sourceLeaves.value.filter(
+      (
+        item
+      ) => {
+        const used =
+          Number(
+            item.used_sessions ||
+            0
+          )
+
+        const total =
+          Number(
+            item.total_sessions ||
+            0
+          )
+
+        return (
+          !item.has_active_makeup &&
+          used < total
+        )
+      }
+    )
+  })
+
+// ============================================================
+// Weekday
+// ============================================================
+
+const weekdayMap = {
+  1: '星期一',
+  2: '星期二',
+  3: '星期三',
+  4: '星期四',
+  5: '星期五',
+  6: '星期六',
+  7: '星期日',
+}
+
+// ============================================================
+// Format
+// ============================================================
+
+const formatDate = (
+  value
+) => {
+  return String(
+    value || ''
+  ).slice(
+    0,
+    10
+  )
+}
+
+const formatTime = (
+  value
+) => {
+  return String(
+    value || ''
+  ).slice(
+    0,
+    5
+  )
 }
 
 // ============================================================
@@ -95,10 +209,10 @@ const getErrorMessage = (
 }
 
 // ============================================================
-// Fetch
+// Load
 // ============================================================
 
-const fetchMakeups =
+const loadData =
   async () => {
     loading.value =
       true
@@ -116,27 +230,21 @@ const fetchMakeups =
         response.student ||
         null
 
+      sourceLeaves.value =
+        response.sourceLeaves ||
+        []
+
       makeups.value =
         response.makeups ||
         []
+    } catch (
+      error
+    ) {
+      console.error(
+        '補課資料載入失敗：',
+        error
+      )
 
-      leaves.value =
-        response.leaves ||
-        []
-
-      sessions.value =
-        response.sessions ||
-        []
-
-      summary.value =
-        response.summary ||
-        {
-          total: 0,
-          active: 0,
-          cancelled: 0,
-          availableLeaves: 0,
-        }
-    } catch (error) {
       errorMessage.value =
         getErrorMessage(
           error,
@@ -149,34 +257,53 @@ const fetchMakeups =
   }
 
 // ============================================================
+// Open Create
+// ============================================================
+
+const openCreate =
+  () => {
+    form.sourceLeaveAttendanceId =
+      availableLeaves.value[0]
+        ?.attendance_id ||
+      ''
+
+    form.makeupDate =
+      getTaipeiToday()
+
+    form.note =
+      ''
+
+    showCreate.value =
+      true
+  }
+
+// ============================================================
 // Create
 // ============================================================
 
-const openCreateDialog =
-  () => {
-    errorMessage.value =
-      ''
+const createMakeup =
+  async () => {
+    if (
+      creating.value
+    ) {
+      return
+    }
 
     if (
-      !leaves.value.length
+      !form.sourceLeaveAttendanceId
     ) {
       errorMessage.value =
-        '目前沒有可以安排補課的請假紀錄'
+        '請選擇原本的請假紀錄'
 
       return
     }
 
-    showCreateDialog.value =
-      true
-  }
-
-const submitMakeup =
-  async (
-    payload
-  ) => {
     if (
-      creating.value
+      !form.makeupDate
     ) {
+      errorMessage.value =
+        '請選擇補課日期'
+
       return
     }
 
@@ -184,6 +311,9 @@ const submitMakeup =
       true
 
     errorMessage.value =
+      ''
+
+    successMessage.value =
       ''
 
     try {
@@ -196,33 +326,39 @@ const submitMakeup =
 
             body: {
               sourceLeaveAttendanceId:
-                payload
+                form
                   .sourceLeaveAttendanceId,
 
-              makeupSessionId:
-                payload
-                  .makeupSessionId,
+              makeupDate:
+                form.makeupDate,
 
               note:
-                payload.note,
+                form.note.trim() ||
+                null,
             },
           }
         )
 
-      showCreateDialog.value =
+      successMessage.value =
+        response.message ||
+        '補課已建立'
+
+      showCreate.value =
         false
 
-      showSuccess(
-        response.message ||
-        '補課安排成功'
+      await loadData()
+    } catch (
+      error
+    ) {
+      console.error(
+        '建立補課失敗：',
+        error
       )
 
-      await fetchMakeups()
-    } catch (error) {
       errorMessage.value =
         getErrorMessage(
           error,
-          '補課安排失敗'
+          '建立補課失敗'
         )
     } finally {
       creating.value =
@@ -231,226 +367,89 @@ const submitMakeup =
   }
 
 // ============================================================
-// Note
+// Action
 // ============================================================
 
-const editMakeupNote =
+const handleAction =
   async (
-    makeup
+    payload
   ) => {
-    if (
-      actionLoadingId.value
-    ) {
-      return
-    }
-
-    const note =
-      window.prompt(
-        '補課備註：',
-        makeup.note ||
-        ''
+    const makeupId =
+      String(
+        payload.makeupId
       )
 
     if (
-      note === null
+      isSaving(
+        makeupId
+      )
     ) {
       return
     }
 
-    actionLoadingId.value =
-      makeup.id
+    savingIds.value.add(
+      makeupId
+    )
+
+    savingIds.value =
+      new Set(
+        savingIds.value
+      )
 
     errorMessage.value =
+      ''
+
+    successMessage.value =
       ''
 
     try {
       const response =
         await $fetch(
-          `/api/makeups/${makeup.id}`,
+          `/api/makeups/${makeupId}`,
           {
             method:
               'PATCH',
 
             body: {
               action:
-                'UPDATE_NOTE',
+                payload.action,
 
               note:
-                note.trim() ||
-                null,
-            },
-          }
-        )
-
-      showSuccess(
-        response.message ||
-        '備註已更新'
-      )
-
-      await fetchMakeups()
-    } catch (error) {
-      errorMessage.value =
-        getErrorMessage(
-          error,
-          '備註修改失敗'
-        )
-    } finally {
-      actionLoadingId.value =
-        null
-    }
-  }
-
-// ============================================================
-// Cancel
-// ============================================================
-
-const cancelMakeup =
-  async (
-    makeup
-  ) => {
-    if (
-      actionLoadingId.value
-    ) {
-      return
-    }
-
-    if (
-      !window.confirm(
-        `確定取消 ${makeup.course_name} 的這筆補課嗎？取消後會把這一堂扣除。`
-      )
-    ) {
-      return
-    }
-
-    const reason =
-      window.prompt(
-        '取消原因，可留空：',
-        ''
-      )
-
-    if (
-      reason === null
-    ) {
-      return
-    }
-
-    actionLoadingId.value =
-      makeup.id
-
-    errorMessage.value =
-      ''
-
-    try {
-      const response =
-        await $fetch(
-          `/api/makeups/${makeup.id}`,
-          {
-            method:
-              'PATCH',
-
-            body: {
-              action:
-                'CANCEL',
+                payload.note,
 
               reason:
-                reason.trim() ||
-                null,
+                payload.reason,
             },
           }
         )
 
-      showSuccess(
+      successMessage.value =
         response.message ||
-        '補課已取消'
+        '補課資料已更新'
+
+      await loadData()
+    } catch (
+      error
+    ) {
+      console.error(
+        '補課異動失敗：',
+        error
       )
 
-      await fetchMakeups()
-    } catch (error) {
       errorMessage.value =
         getErrorMessage(
           error,
-          '補課取消失敗'
+          '補課資料更新失敗'
         )
     } finally {
-      actionLoadingId.value =
-        null
-    }
-  }
-
-// ============================================================
-// Restore
-// ============================================================
-
-const restoreMakeup =
-  async (
-    makeup
-  ) => {
-    if (
-      actionLoadingId.value
-    ) {
-      return
-    }
-
-    if (
-      !window.confirm(
-        `確定恢復 ${makeup.course_name} 的這筆補課嗎？恢復後會重新扣回一堂。`
-      )
-    ) {
-      return
-    }
-
-    const reason =
-      window.prompt(
-        '恢復原因，可留空：',
-        ''
+      savingIds.value.delete(
+        makeupId
       )
 
-    if (
-      reason === null
-    ) {
-      return
-    }
-
-    actionLoadingId.value =
-      makeup.id
-
-    errorMessage.value =
-      ''
-
-    try {
-      const response =
-        await $fetch(
-          `/api/makeups/${makeup.id}`,
-          {
-            method:
-              'PATCH',
-
-            body: {
-              action:
-                'RESTORE',
-
-              reason:
-                reason.trim() ||
-                null,
-            },
-          }
+      savingIds.value =
+        new Set(
+          savingIds.value
         )
-
-      showSuccess(
-        response.message ||
-        '補課已恢復'
-      )
-
-      await fetchMakeups()
-    } catch (error) {
-      errorMessage.value =
-        getErrorMessage(
-          error,
-          '補課恢復失敗'
-        )
-    } finally {
-      actionLoadingId.value =
-        null
     }
   }
 
@@ -460,33 +459,25 @@ const restoreMakeup =
 
 onMounted(
   async () => {
-    await fetchMakeups()
-  }
-)
-
-onBeforeUnmount(
-  () => {
-    if (
-      toastTimer
-    ) {
-      window.clearTimeout(
-        toastTimer
-      )
-    }
+    await loadData()
   }
 )
 </script>
 
 <template>
-  <main class="student-makeup-page">
+  <main class="makeup-page">
     <div class="container">
+      <!-- ====================================================
+           Header
+           ==================================================== -->
+
       <header class="page-header">
         <div>
           <NuxtLink
             to="/student"
             class="back-link"
           >
-            ← 我的課程
+            ← 我的首頁
           </NuxtLink>
 
           <span>
@@ -507,17 +498,35 @@ onBeforeUnmount(
 
         <button
           type="button"
-          class="primary-button"
+          class="create-button"
           :disabled="
-            loading
+            !availableLeaves.length
           "
           @click="
-            openCreateDialog
+            openCreate
           "
         >
-          ＋ 安排補課
+          ＋ 建立補課
         </button>
       </header>
+
+      <!-- ====================================================
+           Rule
+           ==================================================== -->
+
+      <section class="rule-card">
+        <strong>
+          補課實際出席才算 1 堂
+        </strong>
+
+        <p>
+          原本請假不扣堂。建立補課後會產生一筆 MAKEUP + ATTENDED，因此方案增加 1 堂實際出席；若取消補課，這一堂會再扣回。
+        </p>
+      </section>
+
+      <!-- ====================================================
+           Message
+           ==================================================== -->
 
       <div
         v-if="
@@ -530,140 +539,39 @@ onBeforeUnmount(
         }}
       </div>
 
-      <section class="summary-grid">
-        <article>
-          <span>
-            補課紀錄
-          </span>
-
-          <strong>
-            {{
-              summary.total
-            }}
-          </strong>
-        </article>
-
-        <article>
-          <span>
-            有效補課
-          </span>
-
-          <strong>
-            {{
-              summary.active
-            }}
-          </strong>
-        </article>
-
-        <article>
-          <span>
-            待補請假
-          </span>
-
-          <strong>
-            {{
-              summary.availableLeaves
-            }}
-          </strong>
-        </article>
-      </section>
-
-      <!-- ====================================================
-           Available Leave
-           ==================================================== -->
-
-      <section
+      <div
         v-if="
-          leaves.length
+          successMessage
         "
-        class="available-section"
+        class="success-message"
       >
-        <div class="section-title">
-          <span>
-            Available
-          </span>
-
-          <h2>
-            可以補課的請假
-          </h2>
-        </div>
-
-        <div class="leave-list">
-          <article
-            v-for="
-              leave in leaves
-            "
-            :key="
-              leave.attendance_id
-            "
-            class="leave-card"
-          >
-            <div>
-              <strong>
-                {{
-                  leave.course_name
-                }}
-              </strong>
-
-              <span>
-                第
-                {{
-                  leave.package_cycle_no ||
-                  '-'
-                }}
-                期
-              </span>
-            </div>
-
-            <p>
-              {{
-                String(
-                  leave.class_date
-                ).slice(
-                  0,
-                  10
-                )
-              }}
-
-              ・
-
-              {{
-                String(
-                  leave.start_time ||
-                  ''
-                ).slice(
-                  0,
-                  5
-                )
-              }}
-            </p>
-
-            <small
-              v-if="
-                leave.schedule_name
-              "
-            >
-              {{
-                leave.schedule_name
-              }}
-            </small>
-          </article>
-        </div>
-      </section>
+        {{
+          successMessage
+        }}
+      </div>
 
       <!-- ====================================================
-           History
+           Available Leaves
            ==================================================== -->
 
-      <section class="history-section">
-        <div class="section-title">
-          <span>
-            History
-          </span>
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <span>
+              Available Leave
+            </span>
 
-          <h2>
-            補課紀錄
-          </h2>
+            <h2>
+              可以補課的請假
+            </h2>
+          </div>
+
+          <span>
+            {{
+              availableLeaves.length
+            }}
+            筆
+          </span>
         </div>
 
         <div
@@ -677,100 +585,395 @@ onBeforeUnmount(
 
         <div
           v-else-if="
-            makeups.length
+            availableLeaves.length
           "
-          class="makeup-list"
+          class="leave-list"
         >
-          <MakeupCard
+          <article
             v-for="
-              makeup in makeups
+              leave in
+                availableLeaves
             "
             :key="
-              makeup.id
+              leave.attendance_id
             "
-            :makeup="
-              makeup
-            "
-            :editable="
-              true
-            "
-            :loading="
-              String(
-                actionLoadingId ||
-                ''
-              ) ===
-                String(
-                  makeup.id
-                )
-            "
-            @edit-note="
-              editMakeupNote
-            "
-            @cancel="
-              cancelMakeup
-            "
-            @restore="
-              restoreMakeup
-            "
-          />
+          >
+            <div>
+              <span>
+                {{
+                  formatDate(
+                    leave.class_date
+                  )
+                }}
+              </span>
+
+              <strong>
+                {{
+                  leave.course_name
+                }}
+              </strong>
+
+              <small>
+                {{
+                  weekdayMap[
+                    Number(
+                      leave.weekday
+                    )
+                  ]
+                }}
+                ・
+                {{
+                  formatTime(
+                    leave.start_time
+                  )
+                }}
+              </small>
+            </div>
+
+            <div>
+              <span>
+                目前方案
+              </span>
+
+              <strong>
+                {{
+                  leave.used_sessions
+                }}
+                /
+                {{
+                  leave.total_sessions
+                }}
+              </strong>
+            </div>
+          </article>
         </div>
 
         <div
           v-else
           class="empty-state"
         >
-          尚未有補課紀錄。
+          目前沒有可以建立補課的請假紀錄。
+        </div>
+      </section>
+
+      <!-- ====================================================
+           History
+           ==================================================== -->
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <span>
+              History
+            </span>
+
+            <h2>
+              補課紀錄
+            </h2>
+          </div>
+
+          <span>
+            {{
+              makeups.length
+            }}
+            筆
+          </span>
+        </div>
+
+        <div
+          v-if="
+            makeups.length
+          "
+          class="makeup-list"
+        >
+          <MakeupCard
+            v-for="
+              record in
+                makeups
+            "
+            :key="
+              record.id
+            "
+            :record="
+              record
+            "
+            :saving="
+              isSaving(
+                record.id
+              )
+            "
+            @action="
+              handleAction
+            "
+          />
+        </div>
+
+        <div
+          v-else-if="
+            !loading
+          "
+          class="empty-state"
+        >
+          尚無補課紀錄。
         </div>
       </section>
     </div>
 
-    <MakeupCreateDialog
-      v-model="
-        showCreateDialog
-      "
-      :teacher-mode="
-        false
-      "
-      :leaves="
-        leaves
-      "
-      :sessions="
-        sessions
-      "
-      :loading="
-        creating
-      "
-      @submit="
-        submitMakeup
-      "
-    />
+    <!-- ======================================================
+         Create Dialog
+         ====================================================== -->
 
-    <Transition name="toast">
+    <Teleport to="body">
       <div
         v-if="
-          successMessage
+          showCreate
         "
-        class="toast"
+        class="dialog-mask"
+        @click.self="
+          !creating &&
+          (
+            showCreate =
+              false
+          )
+        "
       >
-        {{
-          successMessage
-        }}
+        <form
+          class="dialog"
+          @submit.prevent="
+            createMakeup
+          "
+        >
+          <header>
+            <div>
+              <span>
+                New Makeup
+              </span>
+
+              <h2>
+                建立補課
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              :disabled="
+                creating
+              "
+              @click="
+                showCreate =
+                  false
+              "
+            >
+              ×
+            </button>
+          </header>
+
+          <!-- Leave -->
+
+          <label>
+            <span>
+              要補哪一次請假
+            </span>
+
+            <select
+              v-model="
+                form
+                  .sourceLeaveAttendanceId
+              "
+              required
+              :disabled="
+                creating
+              "
+            >
+              <option
+                v-for="
+                  leave in
+                    availableLeaves
+                "
+                :key="
+                  leave.attendance_id
+                "
+                :value="
+                  leave.attendance_id
+                "
+              >
+                {{
+                  leave.course_name
+                }}
+                ・
+                {{
+                  formatDate(
+                    leave.class_date
+                  )
+                }}
+              </option>
+            </select>
+          </label>
+
+          <!-- Selected -->
+
+          <section
+            v-if="
+              selectedLeave
+            "
+            class="leave-preview"
+          >
+            <span>
+              原始請假
+            </span>
+
+            <strong>
+              {{
+                selectedLeave
+                  .course_name
+              }}
+            </strong>
+
+            <p>
+              {{
+                formatDate(
+                  selectedLeave
+                    .class_date
+                )
+              }}
+              ・
+              {{
+                formatTime(
+                  selectedLeave
+                    .start_time
+                )
+              }}
+            </p>
+
+            <p>
+              方案：
+              {{
+                selectedLeave
+                  .used_sessions
+              }}
+              /
+              {{
+                selectedLeave
+                  .total_sessions
+              }}
+            </p>
+          </section>
+
+          <!-- Date -->
+
+          <label>
+            <span>
+              補課日期
+            </span>
+
+            <input
+              v-model="
+                form.makeupDate
+              "
+              type="date"
+              required
+              :disabled="
+                creating
+              "
+            >
+
+            <small
+              v-if="
+                selectedLeave
+              "
+            >
+              此課堂固定為
+              {{
+                weekdayMap[
+                  Number(
+                    selectedLeave.weekday
+                  )
+                ]
+              }}
+              ，補課日期也必須選擇該課堂可上課日期。
+            </small>
+          </label>
+
+          <!-- Note -->
+
+          <label>
+            <span>
+              備註
+            </span>
+
+            <textarea
+              v-model="
+                form.note
+              "
+              rows="3"
+              maxlength="2000"
+              placeholder="選填..."
+              :disabled="
+                creating
+              "
+            />
+          </label>
+
+          <!-- Important -->
+
+          <section class="dialog-rule">
+            <strong>
+              建立後會 +1 堂
+            </strong>
+
+            <p>
+              這不是預約而已。建立補課代表這堂補課已實際出席，因此系統會建立 MAKEUP + ATTENDED 並立即累加方案堂數。
+            </p>
+          </section>
+
+          <footer>
+            <button
+              type="button"
+              :disabled="
+                creating
+              "
+              @click="
+                showCreate =
+                  false
+              "
+            >
+              取消
+            </button>
+
+            <button
+              type="submit"
+              class="confirm"
+              :disabled="
+                creating ||
+                !form
+                  .sourceLeaveAttendanceId ||
+                !form.makeupDate
+              "
+            >
+              {{
+                creating
+                  ? '建立中...'
+                  : '確認補課'
+              }}
+            </button>
+          </footer>
+        </form>
       </div>
-    </Transition>
+    </Teleport>
   </main>
 </template>
 
 <style scoped>
-.student-makeup-page {
+.makeup-page {
   min-height: 100vh;
-  padding: 20px 14px 50px;
-  background: #f7f7f7;
+  padding: 24px 16px 60px;
+  background: #f6f6f6;
   color: #222222;
 }
 
 .container {
   width: 100%;
-  max-width: 560px;
+  max-width: 820px;
   margin: 0 auto;
 }
 
@@ -778,164 +981,332 @@ onBeforeUnmount(
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: 15px;
 }
 
 .back-link {
   display: block;
-  margin-bottom: 13px;
+  margin-bottom: 12px;
   color: #777777;
   font-size: 10px;
   text-decoration: none;
 }
 
-.page-header > div > span,
-.section-title span {
+.page-header > div > span {
   color: #999999;
-  font-size: 9px;
+  font-size: 8px;
   letter-spacing: 1px;
 }
 
 .page-header h1 {
-  margin: 4px 0 0;
-  font-size: 24px;
+  margin: 3px 0 0;
+  font-size: 27px;
 }
 
 .page-header p {
   margin: 4px 0 0;
   color: #888888;
-  font-size: 10px;
-}
-
-.primary-button {
-  min-height: 39px;
-  padding: 0 12px;
-  border: 0;
-  background: #222222;
-  border-radius: 11px;
-  color: #ffffff;
-  font-size: 10px;
-}
-
-.primary-button:disabled {
-  opacity: 0.5;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns:
-    repeat(
-      3,
-      1fr
-    );
-  gap: 8px;
-  margin-top: 17px;
-}
-
-.summary-grid article {
-  padding: 12px;
-  background: #ffffff;
-  border-radius: 14px;
-}
-
-.summary-grid span {
-  color: #999999;
-  font-size: 8px;
-}
-
-.summary-grid strong {
-  display: block;
-  margin-top: 6px;
-  font-size: 18px;
-}
-
-.available-section,
-.history-section {
-  margin-top: 18px;
-}
-
-.section-title h2 {
-  margin: 3px 0 9px;
-  font-size: 16px;
-}
-
-.leave-list {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.leave-card {
-  flex: 0 0 190px;
-  padding: 13px;
-  background: #ffffff;
-  border: 1px solid #eeeeee;
-  border-radius: 14px;
-}
-
-.leave-card > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.leave-card strong {
-  font-size: 11px;
-}
-
-.leave-card span {
-  color: #999999;
-  font-size: 8px;
-}
-
-.leave-card p {
-  margin: 7px 0 0;
-  color: #666666;
   font-size: 9px;
 }
 
-.leave-card small {
-  display: block;
-  margin-top: 4px;
+.create-button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  background: #222222;
+  border-radius: 10px;
+  color: #ffffff;
+}
+
+.create-button:disabled {
+  opacity: 0.4;
+}
+
+/* ============================================================
+   Rule
+   ============================================================ */
+
+.rule-card {
+  margin-top: 16px;
+  padding: 13px;
+  background: #222222;
+  border-radius: 14px;
+  color: #ffffff;
+}
+
+.rule-card strong {
+  font-size: 10px;
+}
+
+.rule-card p {
+  margin: 5px 0 0;
+  color: rgb(255 255 255 / 60%);
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   Message
+   ============================================================ */
+
+.error-message,
+.success-message {
+  margin-top: 9px;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 9px;
+}
+
+.error-message {
+  background: #fff0f0;
+  color: #c94343;
+}
+
+.success-message {
+  background: #eef8ee;
+  color: #418b4b;
+}
+
+/* ============================================================
+   Section
+   ============================================================ */
+
+.section {
+  margin-top: 18px;
+}
+
+.section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.section-header > div > span {
   color: #999999;
   font-size: 8px;
+  letter-spacing: 1px;
 }
+
+.section-header h2 {
+  margin: 3px 0 0;
+  font-size: 16px;
+}
+
+.section-header > span {
+  color: #888888;
+  font-size: 8px;
+}
+
+/* ============================================================
+   Leave
+   ============================================================ */
+
+.leave-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.leave-list article {
+  display: grid;
+  grid-template-columns:
+    2fr
+    1fr;
+  gap: 10px;
+  padding: 11px;
+  background: #ffffff;
+  border-radius: 11px;
+}
+
+.leave-list article > div:last-child {
+  text-align: right;
+}
+
+.leave-list span {
+  display: block;
+  color: #999999;
+  font-size: 7px;
+}
+
+.leave-list strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+}
+
+.leave-list small {
+  display: block;
+  margin-top: 3px;
+  color: #888888;
+  font-size: 7px;
+}
+
+/* ============================================================
+   Makeup
+   ============================================================ */
 
 .makeup-list {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
+  margin-top: 9px;
 }
 
 .empty-state {
-  padding: 28px;
+  margin-top: 9px;
+  padding: 27px;
   background: #ffffff;
-  border-radius: 16px;
+  border-radius: 13px;
   color: #aaaaaa;
-  font-size: 10px;
+  font-size: 9px;
   text-align: center;
 }
 
-.error-message {
-  margin-top: 11px;
-  padding: 10px;
-  background: #fff0f0;
-  border-radius: 10px;
-  color: #c94343;
-  font-size: 10px;
+/* ============================================================
+   Dialog
+   ============================================================ */
+
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 48%);
 }
 
-.toast {
-  position: fixed;
-  bottom: 25px;
-  left: 50%;
-  z-index: 1300;
-  padding: 10px 17px;
+.dialog {
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 19px;
+  background: #ffffff;
+  border-radius: 19px;
+}
+
+.dialog > header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.dialog header span {
+  color: #999999;
+  font-size: 8px;
+}
+
+.dialog h2 {
+  margin: 3px 0 0;
+}
+
+.dialog header button {
+  width: 33px;
+  height: 33px;
+  border: 0;
+  background: #eeeeee;
+  border-radius: 50%;
+}
+
+.dialog > label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.dialog label > span {
+  color: #777777;
+  font-size: 8px;
+}
+
+.dialog select,
+.dialog input,
+.dialog textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #dddddd;
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.dialog select,
+.dialog input {
+  min-height: 39px;
+}
+
+.dialog small {
+  color: #999999;
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.leave-preview {
+  margin-top: 10px;
+  padding: 11px;
+  background: #f7f7f7;
+  border-radius: 10px;
+}
+
+.leave-preview > span {
+  color: #999999;
+  font-size: 7px;
+}
+
+.leave-preview strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.leave-preview p {
+  margin: 4px 0 0;
+  color: #777777;
+  font-size: 8px;
+}
+
+.dialog-rule {
+  margin-top: 12px;
+  padding: 10px;
+  background: #fff5df;
+  border-radius: 9px;
+}
+
+.dialog-rule strong {
+  color: #856319;
+  font-size: 9px;
+}
+
+.dialog-rule p {
+  margin: 4px 0 0;
+  color: #8d7541;
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.dialog footer {
+  display: grid;
+  grid-template-columns:
+    1fr
+    1fr;
+  gap: 7px;
+  margin-top: 15px;
+}
+
+.dialog footer button {
+  min-height: 40px;
+  border: 0;
+  background: #eeeeee;
+  border-radius: 9px;
+}
+
+.dialog footer .confirm {
   background: #222222;
-  border-radius: 999px;
   color: #ffffff;
-  font-size: 10px;
-  transform: translateX(-50%);
+}
+
+button:disabled {
+  opacity: 0.4;
 }
 </style>

@@ -11,84 +11,184 @@ definePageMeta({
 const loading =
   ref(true)
 
+const resetSaving =
+  ref(false)
+
+const resettingId =
+  ref('')
+
 const errorMessage =
   ref('')
 
-const authStore =
-  useAuthStore()
+const successMessage =
+  ref('')
 
-const {
-  $liff,
-} =
-  useNuxtApp()
+const student =
+  ref(null)
 
-const dashboard =
-  ref({
-    today: '',
-    student: null,
-    courses: [],
-    nextSession: null,
-    pendingMakeups: [],
-    recentLeaves: [],
-    recentMakeups: [],
-    recentAudit: [],
+const courses =
+  ref([])
+
+const packages =
+  ref([])
+
+const auditLogs =
+  ref([])
+
+const auditActions =
+  ref([])
+
+// ============================================================
+// Course Filters
+// ============================================================
+
+const courseFilters =
+  reactive({
+    courseId: '',
+    status: '',
   })
 
 // ============================================================
-// Date
+// Audit Filters
 // ============================================================
 
-const formatDate = (
-  value
-) => {
-  return value
-    ? String(
-        value
-      ).slice(
-        0,
-        10
+const auditFilters =
+  reactive({
+    actorRole: '',
+    action: '',
+  })
+
+// ============================================================
+// Reset Dialog
+// ============================================================
+
+const showResetDialog =
+  ref(false)
+
+const resetPackage =
+  ref(null)
+
+// ============================================================
+// Taipei Today
+// ============================================================
+
+const getTaipeiToday =
+  () => {
+    return new Intl
+      .DateTimeFormat(
+        'en-CA',
+        {
+          timeZone:
+            'Asia/Taipei',
+
+          year:
+            'numeric',
+
+          month:
+            '2-digit',
+
+          day:
+            '2-digit',
+        },
       )
-    : '-'
-}
+      .format(
+        new Date(),
+      )
+  }
+
+const resetForm =
+  reactive({
+    purchasedCycles: 1,
+
+    startDate:
+      getTaipeiToday(),
+  })
 
 // ============================================================
-// Time
+// Reset Preview
 // ============================================================
 
-const formatTime = (
-  value
-) => {
-  return String(
-    value || ''
-  ).slice(
-    0,
-    5
-  )
-}
+const resetSessionsPerCycle =
+  computed(() => {
+    return Number(
+      resetPackage.value
+        ?.sessions_per_cycle ||
+      0,
+    )
+  })
+
+const resetPricePerCycle =
+  computed(() => {
+    return Number(
+      resetPackage.value
+        ?.price_per_cycle ||
+      0,
+    )
+  })
+
+const resetPurchasedCycles =
+  computed(() => {
+    const parsed =
+      Number.parseInt(
+        String(
+          resetForm
+            .purchasedCycles ||
+          1,
+        ),
+        10,
+      )
+
+    return Math.max(
+      Number.isInteger(
+        parsed,
+      )
+        ? parsed
+        : 1,
+      1,
+    )
+  })
+
+const resetTotalSessions =
+  computed(() => {
+    return (
+      resetSessionsPerCycle.value *
+      resetPurchasedCycles.value
+    )
+  })
+
+const resetTotalPrice =
+  computed(() => {
+    return (
+      resetPricePerCycle.value *
+      resetPurchasedCycles.value
+    )
+  })
 
 // ============================================================
-// DateTime
+// Format
 // ============================================================
 
 const formatDateTime = (
-  value
+  value,
 ) => {
-  if (!value) {
+  if (
+    !value
+  ) {
     return '-'
   }
 
   const date =
     new Date(
-      value
+      value,
     )
 
   if (
     Number.isNaN(
-      date.getTime()
+      date.getTime(),
     )
   ) {
     return String(
-      value
+      value,
     )
   }
 
@@ -98,6 +198,9 @@ const formatDateTime = (
       {
         timeZone:
           'Asia/Taipei',
+
+        year:
+          'numeric',
 
         month:
           '2-digit',
@@ -113,118 +216,177 @@ const formatDateTime = (
 
         hourCycle:
           'h23',
-      }
+      },
     )
     .format(
-      date
+      date,
     )
 }
 
-// ============================================================
-// Weekday
-// ============================================================
-
-const getWeekdayLabel = (
-  value
+const formatMoney = (
+  value,
 ) => {
-  const map = {
-    1: '星期一',
-    2: '星期二',
-    3: '星期三',
-    4: '星期四',
-    5: '星期五',
-    6: '星期六',
-    7: '星期日',
-  }
-
-  return (
-    map[
-      Number(
-        value
-      )
-    ] ||
-    ''
+  return new Intl.NumberFormat(
+    'zh-TW',
+    {
+      maximumFractionDigits:
+        0,
+    },
+  ).format(
+    Number(
+      value || 0,
+    ),
   )
 }
 
 // ============================================================
-// Action
-// ============================================================
-
-const getActionLabel = (
-  value
-) => {
-  const map = {
-    CREATE: '新增',
-    UPDATE: '修改',
-    CANCEL: '取消',
-    RESTORE: '恢復',
-    RENEW: '續期',
-    LINK: '綁定',
-    UNLINK: '解除綁定',
-  }
-
-  return (
-    map[value] ||
-    value ||
-    '-'
-  )
-}
-
-// ============================================================
-// Entity
-// ============================================================
-
-const getEntityLabel = (
-  value
-) => {
-  const map = {
-    ATTENDANCE: '出席',
-    LEAVE: '請假',
-    MAKEUP: '補課',
-    PACKAGE: '方案',
-    SESSION: '課堂',
-    ENROLLMENT: '選課',
-    STUDENT: '學生',
-    USER: '帳號',
-  }
-
-  return (
-    map[value] ||
-    value ||
-    '-'
-  )
-}
-
-// ============================================================
-// Actor
+// Audit Labels
 // ============================================================
 
 const getActorLabel = (
-  value
+  role,
 ) => {
   if (
-    value ===
-    'STUDENT'
-  ) {
-    return '我'
-  }
-
-  if (
-    value ===
-    'TEACHER'
+    role === 'TEACHER'
   ) {
     return '老師'
   }
 
-  return '系統'
+  if (
+    role === 'STUDENT'
+  ) {
+    return '學生'
+  }
+
+  return role || '-'
+}
+
+const getActionLabel = (
+  action,
+) => {
+  const map = {
+    CREATE:
+      '新增',
+
+    UPDATE:
+      '修改',
+
+    CANCEL:
+      '取消',
+
+    RESTORE:
+      '恢復',
+
+    RENEW:
+      'Reset / 新一輪',
+
+    DELETE:
+      '刪除',
+
+    BIND:
+      '綁定',
+
+    UNBIND:
+      '解除綁定',
+  }
+
+  return (
+    map[action] ||
+    action ||
+    '-'
+  )
+}
+
+const getEntityLabel = (
+  entityType,
+) => {
+  const map = {
+    PACKAGE:
+      '課程方案',
+
+    ATTENDANCE:
+      '上課紀錄',
+
+    STUDENT:
+      '學生資料',
+
+    MAKEUP:
+      '補課紀錄',
+
+    LEAVE:
+      '請假紀錄',
+
+    LINE_IDENTITY:
+      'LINE 綁定',
+  }
+
+  return (
+    map[entityType] ||
+    entityType ||
+    '-'
+  )
 }
 
 // ============================================================
-// Fetch
+// Error
 // ============================================================
 
-const fetchDashboard =
+const getErrorMessage = (
+  error,
+  fallback,
+) => {
+  return (
+    error?.data
+      ?.statusMessage ||
+    error?.statusMessage ||
+    error?.message ||
+    fallback
+  )
+}
+
+// ============================================================
+// Query
+// ============================================================
+
+const buildQuery = () => {
+  const query = {}
+
+  if (
+    courseFilters.courseId
+  ) {
+    query.courseId =
+      courseFilters.courseId
+  }
+
+  if (
+    courseFilters.status
+  ) {
+    query.packageStatus =
+      courseFilters.status
+  }
+
+  if (
+    auditFilters.actorRole
+  ) {
+    query.actorRole =
+      auditFilters.actorRole
+  }
+
+  if (
+    auditFilters.action
+  ) {
+    query.auditAction =
+      auditFilters.action
+  }
+
+  return query
+}
+
+// ============================================================
+// Load
+// ============================================================
+
+const loadWorkspace =
   async () => {
     loading.value =
       true
@@ -235,99 +397,200 @@ const fetchDashboard =
     try {
       const response =
         await $fetch(
-          '/api/student/dashboard'
+          '/api/student/workspace',
+          {
+            query:
+              buildQuery(),
+          },
         )
 
-      dashboard.value =
-        response.dashboard ||
-        dashboard.value
-    } catch (error) {
+      student.value =
+        response.student ||
+        null
+
+      courses.value =
+        response.courses ||
+        []
+
+      packages.value =
+        response.packages ||
+        []
+
+      auditLogs.value =
+        response.auditLogs ||
+        []
+
+      auditActions.value =
+        response.auditActions ||
+        []
+    }
+    catch (error) {
       console.error(
-        'Student Dashboard 載入失敗：',
-        error
+        '學生首頁載入失敗：',
+        error,
       )
 
       errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.statusMessage ||
-        error?.message ||
-        '首頁資料載入失敗'
-    } finally {
+        getErrorMessage(
+          error,
+          '資料載入失敗',
+        )
+    }
+    finally {
       loading.value =
         false
     }
   }
 
 // ============================================================
-// LIFF Login
-//
-// 將 LINE 的 LIFF 登入轉換成後端的 httpOnly Session Cookie。
+// Clear Course Filter
 // ============================================================
 
-const authenticate =
+const clearCourseFilters =
   async () => {
-    const existingSession =
-      await authStore
-        .fetchStudentMe({
-          force: true,
-        })
+    courseFilters.courseId =
+      ''
 
+    courseFilters.status =
+      ''
+
+    await loadWorkspace()
+  }
+
+// ============================================================
+// Clear Audit Filter
+// ============================================================
+
+const clearAuditFilters =
+  async () => {
+    auditFilters.actorRole =
+      ''
+
+    auditFilters.action =
+      ''
+
+    await loadWorkspace()
+  }
+
+// ============================================================
+// Open Reset
+// ============================================================
+
+const openReset =
+  (
+    packageData,
+  ) => {
+    resetPackage.value =
+      packageData
+
+    resetForm.purchasedCycles =
+      1
+
+    resetForm.startDate =
+      getTaipeiToday()
+
+    showResetDialog.value =
+      true
+  }
+
+// ============================================================
+// Close Reset
+// ============================================================
+
+const closeReset =
+  () => {
     if (
-      existingSession
-        ?.success
+      resetSaving.value
     ) {
-      return true
+      return
     }
 
-    const loggedIn =
-      await $liff
-        .login(
-          'STUDENT'
+    showResetDialog.value =
+      false
+
+    resetPackage.value =
+      null
+  }
+
+// ============================================================
+// Submit Reset
+// ============================================================
+
+const submitReset =
+  async () => {
+    if (
+      resetSaving.value ||
+      !resetPackage.value
+    ) {
+      return
+    }
+
+    resetSaving.value =
+      true
+
+    resettingId.value =
+      String(
+        resetPackage.value.id,
+      )
+
+    errorMessage.value =
+      ''
+
+    successMessage.value =
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          '/api/student/workspace/reset',
+          {
+            method:
+              'POST',
+
+            body: {
+              packageId:
+                resetPackage.value.id,
+
+              purchasedCycles:
+                resetPurchasedCycles.value,
+
+              startDate:
+                resetForm.startDate,
+            },
+          },
         )
 
-    if (!loggedIn) {
-      return false
-    }
+      successMessage.value =
+        response.message ||
+        '新一輪已開始'
 
-    const idToken =
-      await $liff
-        .getIdToken(
-          'STUDENT'
+      showResetDialog.value =
+        false
+
+      resetPackage.value =
+        null
+
+      await loadWorkspace()
+    }
+    catch (error) {
+      console.error(
+        'Reset 失敗：',
+        error,
+      )
+
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          'Reset 失敗',
         )
-
-    if (!idToken) {
-      throw new Error(
-        '無法取得 LINE 登入憑證，請重新開啟學生入口。'
-      )
     }
+    finally {
+      resetSaving.value =
+        false
 
-    await $fetch(
-      '/api/auth/student/line',
-      {
-        method: 'POST',
-
-        body: {
-          idToken,
-        },
-      }
-    )
-
-    const session =
-      await authStore
-        .fetchStudentMe({
-          force: true,
-        })
-
-    if (
-      !session?.success
-    ) {
-      throw new Error(
-        '登入 Session 建立失敗，請重新開啟學生入口。'
-      )
+      resettingId.value =
+        ''
     }
-
-    return true
   }
 
 // ============================================================
@@ -336,40 +599,13 @@ const authenticate =
 
 onMounted(
   async () => {
-    loading.value =
-      true
-
-    errorMessage.value =
-      ''
-
-    try {
-      if (
-        await authenticate()
-      ) {
-        await fetchDashboard()
-      }
-    } catch (error) {
-      console.error(
-        'Student LIFF 登入失敗：',
-        error
-      )
-
-      errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.statusMessage ||
-        error?.message ||
-        'LINE 登入失敗，請重新開啟學生入口。'
-
-      loading.value =
-        false
-    }
-  }
+    await loadWorkspace()
+  },
 )
 </script>
 
 <template>
-  <main class="student-dashboard">
+  <main class="student-page">
     <div class="container">
       <!-- ====================================================
            Header
@@ -378,760 +614,642 @@ onMounted(
       <header class="page-header">
         <div>
           <span>
-            My Courses
+            TapLife
           </span>
 
           <h1>
             {{
-              dashboard.student
-                ?.name
+              student?.name ||
+              '我的課程'
             }}
           </h1>
 
           <p>
-            {{
-              dashboard.today
-            }}
+            查看課程進度、完成日期與完整操作紀錄。
           </p>
         </div>
-
-        <button
-          type="button"
-          class="refresh-button"
-          :disabled="
-            loading
-          "
-          @click="
-            fetchDashboard
-          "
-        >
-          {{
-            loading
-              ? '更新中'
-              : '更新'
-          }}
-        </button>
       </header>
 
       <!-- ====================================================
-           Error
+           Message
            ==================================================== -->
 
       <div
-        v-if="
-          errorMessage
-        "
+        v-if="errorMessage"
         class="error-message"
       >
         {{ errorMessage }}
       </div>
 
-      <!-- ====================================================
-           Navigation
-           ==================================================== -->
-
-      <nav class="navigation-grid">
-        <NuxtLink
-          to="/student/attendance"
-        >
-          <span>
-            Attendance
-          </span>
-
-          <strong>
-            簽到紀錄
-          </strong>
-        </NuxtLink>
-
-        <NuxtLink
-          to="/student/leave"
-        >
-          <span>
-            Leave
-          </span>
-
-          <strong>
-            我要請假
-          </strong>
-        </NuxtLink>
-
-        <NuxtLink
-          to="/student/makeup"
-        >
-          <span>
-            Makeup
-          </span>
-
-          <strong>
-            我的補課
-          </strong>
-        </NuxtLink>
-
-        <NuxtLink
-          to="/student/audit"
-          class="audit-link"
-        >
-          <span>
-            My Timeline
-          </span>
-
-          <strong>
-            我的操作紀錄
-          </strong>
-        </NuxtLink>
-      </nav>
+      <div
+        v-if="successMessage"
+        class="success-message"
+      >
+        {{ successMessage }}
+      </div>
 
       <!-- ====================================================
-           Next Session
+           Loading
            ==================================================== -->
 
-      <section class="section">
-        <div class="section-title">
-          <span>
-            Next Class
-          </span>
+      <div
+        v-if="loading"
+        class="empty-state"
+      >
+        載入資料中...
+      </div>
 
-          <h2>
-            下一堂課
-          </h2>
-        </div>
+      <template v-else>
+        <!-- ==================================================
+             Courses
+             ================================================== -->
 
-        <article
-          v-if="
-            dashboard.nextSession
+        <section class="section">
+          <div class="section-header">
+            <div>
+              <span>
+                My Courses
+              </span>
+
+              <h2>
+                我的課程
+              </h2>
+            </div>
+          </div>
+
+          <!-- ================================================
+               Filters
+               ================================================ -->
+
+          <div class="filters">
+            <label>
+              <span>
+                課程
+              </span>
+
+              <select
+                v-model="
+                  courseFilters.courseId
+                "
+              >
+                <option value="">
+                  全部課程
+                </option>
+
+                <option
+                  v-for="course in courses"
+                  :key="course.id"
+                  :value="course.id"
+                >
+                  {{ course.name }}
+                </option>
+              </select>
+            </label>
+
+            <label>
+              <span>
+                狀態
+              </span>
+
+              <select
+                v-model="
+                  courseFilters.status
+                "
+              >
+                <option value="">
+                  全部狀態
+                </option>
+
+                <option value="ACTIVE">
+                  進行中
+                </option>
+
+                <option value="COMPLETED">
+                  已完成
+                </option>
+
+                <option value="CANCELLED">
+                  已取消
+                </option>
+              </select>
+            </label>
+
+            <button
+              type="button"
+              @click="
+                loadWorkspace
+              "
+            >
+              查詢
+            </button>
+
+            <button
+              type="button"
+              class="secondary"
+              @click="
+                clearCourseFilters
+              "
+            >
+              清除
+            </button>
+          </div>
+
+          <!-- ================================================
+               Table
+               ================================================ -->
+
+          <StudentStudentCourseTable
+            :packages="packages"
+            :resetting-id="
+              resettingId
+            "
+            @reset="
+              openReset
+            "
+          />
+        </section>
+
+        <!-- ==================================================
+             Audit
+             ================================================== -->
+
+        <section class="section audit-section">
+          <div class="section-header">
+            <div>
+              <span>
+                Audit Log
+              </span>
+
+              <h2>
+                操作紀錄
+              </h2>
+
+              <p>
+                老師與學生對你的資料所做的修改都會保留。
+              </p>
+            </div>
+
+            <span class="log-count">
+              {{ auditLogs.length }} 筆
+            </span>
+          </div>
+
+          <!-- ================================================
+               Audit Filters
+               ================================================ -->
+
+          <div class="filters audit-filters">
+            <label>
+              <span>
+                操作者
+              </span>
+
+              <select
+                v-model="
+                  auditFilters.actorRole
+                "
+              >
+                <option value="">
+                  全部
+                </option>
+
+                <option value="TEACHER">
+                  老師
+                </option>
+
+                <option value="STUDENT">
+                  學生
+                </option>
+              </select>
+            </label>
+
+            <label>
+              <span>
+                操作
+              </span>
+
+              <select
+                v-model="
+                  auditFilters.action
+                "
+              >
+                <option value="">
+                  全部
+                </option>
+
+                <option
+                  v-for="
+                    action in
+                      auditActions
+                  "
+                  :key="action"
+                  :value="action"
+                >
+                  {{
+                    getActionLabel(
+                      action
+                    )
+                  }}
+                </option>
+              </select>
+            </label>
+
+            <button
+              type="button"
+              @click="
+                loadWorkspace
+              "
+            >
+              查詢
+            </button>
+
+            <button
+              type="button"
+              class="secondary"
+              @click="
+                clearAuditFilters
+              "
+            >
+              清除
+            </button>
+          </div>
+
+          <!-- ================================================
+               Audit Table
+               ================================================ -->
+
+          <div class="audit-table-wrapper">
+            <table
+              v-if="
+                auditLogs.length
+              "
+              class="audit-table"
+            >
+              <thead>
+                <tr>
+                  <th>
+                    時間
+                  </th>
+
+                  <th>
+                    操作者
+                  </th>
+
+                  <th>
+                    類型
+                  </th>
+
+                  <th>
+                    操作
+                  </th>
+
+                  <th>
+                    課程
+                  </th>
+
+                  <th>
+                    說明
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr
+                  v-for="
+                    log in auditLogs
+                  "
+                  :key="log.id"
+                >
+                  <td data-label="時間">
+                    {{
+                      formatDateTime(
+                        log.created_at
+                      )
+                    }}
+                  </td>
+
+                  <td data-label="操作者">
+                    <strong>
+                      {{
+                        getActorLabel(
+                          log.actor_role
+                        )
+                      }}
+                    </strong>
+
+                    <small>
+                      {{
+                        log.actor_name ||
+                        ''
+                      }}
+                    </small>
+                  </td>
+
+                  <td data-label="類型">
+                    {{
+                      getEntityLabel(
+                        log.entity_type
+                      )
+                    }}
+                  </td>
+
+                  <td data-label="操作">
+                    {{
+                      getActionLabel(
+                        log.action
+                      )
+                    }}
+                  </td>
+
+                  <td data-label="課程">
+                    {{
+                      log.course_name ||
+                      '-'
+                    }}
+                  </td>
+
+                  <td data-label="說明">
+                    {{
+                      log.note ||
+                      '-'
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div
+              v-else
+              class="empty-state compact"
+            >
+              沒有符合條件的操作紀錄。
+            </div>
+          </div>
+        </section>
+      </template>
+    </div>
+
+    <!-- ======================================================
+         Reset Dialog
+         ====================================================== -->
+
+    <Teleport to="body">
+      <div
+        v-if="
+          showResetDialog &&
+          resetPackage
+        "
+        class="dialog-mask"
+        @click.self="
+          closeReset
+        "
+      >
+        <form
+          class="dialog"
+          @submit.prevent="
+            submitReset
           "
-          class="next-card"
         >
-          <div>
+          <!-- ================================================
+               Header
+               ================================================ -->
+
+          <header>
+            <div>
+              <span>
+                Reset
+              </span>
+
+              <h2>
+                開始新一輪
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              :disabled="
+                resetSaving
+              "
+              @click="
+                closeReset
+              "
+            >
+              ×
+            </button>
+          </header>
+
+          <!-- ================================================
+               Course
+               ================================================ -->
+
+          <section class="reset-course">
+            <span>
+              課程
+            </span>
+
             <strong>
               {{
-                dashboard
-                  .nextSession
+                resetPackage
                   .course_name
               }}
             </strong>
 
-            <span>
+            <p>
+              上一輪：
               {{
-                dashboard
-                  .nextSession
-                  .schedule_name
+                resetPackage
+                  .used_sessions
               }}
+              /
+              {{
+                resetPackage
+                  .total_sessions
+              }}
+              堂
+            </p>
+          </section>
+
+          <!-- ================================================
+               Cycle
+               ================================================ -->
+
+          <label>
+            <span>
+              新一輪購買幾期
             </span>
 
-            <small
-              v-if="
-                dashboard
-                  .nextSession
-                  .is_fixed_schedule
+            <input
+              v-model.number="
+                resetForm
+                  .purchasedCycles
+              "
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              required
+              :disabled="
+                resetSaving
               "
             >
-              固定上課時段
-            </small>
+          </label>
+
+          <div class="cycle-buttons">
+            <button
+              v-for="
+                count in [
+                  1,
+                  2,
+                  3,
+                ]
+              "
+              :key="count"
+              type="button"
+              :class="{
+                selected:
+                  resetPurchasedCycles ===
+                    count,
+              }"
+              @click="
+                resetForm
+                  .purchasedCycles =
+                    count
+              "
+            >
+              {{ count }} 期
+            </button>
           </div>
 
-          <div class="next-time">
+          <!-- ================================================
+               Start Date
+               ================================================ -->
+
+          <label>
+            <span>
+              新一輪開始日期
+            </span>
+
+            <input
+              v-model="
+                resetForm.startDate
+              "
+              type="date"
+              required
+              :disabled="
+                resetSaving
+              "
+            >
+          </label>
+
+          <!-- ================================================
+               Preview
+               ================================================ -->
+
+          <section class="reset-preview">
+            <div>
+              <span>
+                每期
+              </span>
+
+              <strong>
+                {{
+                  resetSessionsPerCycle
+                }}
+                堂
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                新總堂數
+              </span>
+
+              <strong>
+                {{
+                  resetTotalSessions
+                }}
+                堂
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                新方案金額
+              </span>
+
+              <strong>
+                $
+                {{
+                  formatMoney(
+                    resetTotalPrice
+                  )
+                }}
+              </strong>
+            </div>
+          </section>
+
+          <!-- ================================================
+               Payment
+               ================================================ -->
+
+          <div class="payment-notice">
             <strong>
-              {{
-                formatDate(
-                  dashboard
-                    .nextSession
-                    .class_date
-                )
-              }}
+              Reset 後會先顯示未付款
             </strong>
 
-            <span>
+            <p>
+              付款仍由老師人工確認，因此學生自行開始新一輪不會自行把方案標記成已付款。
+            </p>
+          </div>
+
+          <!-- ================================================
+               Footer
+               ================================================ -->
+
+          <footer>
+            <button
+              type="button"
+              :disabled="
+                resetSaving
+              "
+              @click="
+                closeReset
+              "
+            >
+              取消
+            </button>
+
+            <button
+              type="submit"
+              class="confirm"
+              :disabled="
+                resetSaving
+              "
+            >
               {{
-                formatTime(
-                  dashboard
-                    .nextSession
-                    .start_time
-                )
+                resetSaving
+                  ? '處理中...'
+                  : `開始 ${resetTotalSessions} 堂新一輪`
               }}
-              -
-              {{
-                formatTime(
-                  dashboard
-                    .nextSession
-                    .end_time
-                )
-              }}
-            </span>
-          </div>
-        </article>
-
-        <div
-          v-else
-          class="empty-state"
-        >
-          目前沒有下一堂課。
-        </div>
-      </section>
-
-      <!-- ====================================================
-           Courses
-           ==================================================== -->
-
-      <section class="section">
-        <div class="section-title">
-          <span>
-            Courses
-          </span>
-
-          <h2>
-            我的課程
-          </h2>
-        </div>
-
-        <div
-          v-if="
-            dashboard.courses
-              .length
-          "
-          class="course-list"
-        >
-          <article
-            v-for="
-              course in
-                dashboard.courses
-            "
-            :key="
-              course.id
-            "
-            class="course-card"
-          >
-            <header>
-              <div>
-                <span>
-                  Course
-                </span>
-
-                <h3>
-                  {{
-                    course.course_name
-                  }}
-                </h3>
-              </div>
-
-              <span
-                v-if="
-                  course.canRenew
-                "
-                class="renew-badge"
-              >
-                可續期
-              </span>
-            </header>
-
-            <!-- Package -->
-
-            <div
-              v-if="
-                course.package
-              "
-              class="package-area"
-            >
-              <div class="package-number">
-                <strong>
-                  {{
-                    course.attendedCount
-                  }}
-                </strong>
-
-                <span>
-                  /
-                  {{
-                    course.totalSessions
-                  }}
-                  堂
-                </span>
-              </div>
-
-              <div class="progress-track">
-                <div
-                  class="progress-value"
-                  :style="{
-                    width:
-                      `${
-                        course.totalSessions
-                          ? Math.min(
-                              course.attendedCount /
-                              course.totalSessions *
-                              100,
-                              100
-                            )
-                          : 0
-                      }%`,
-                  }"
-                />
-              </div>
-
-              <div class="package-meta">
-                <span>
-                  第
-                  {{
-                    course.package
-                      .cycle_no
-                  }}
-                  期
-                </span>
-
-                <span>
-                  剩餘
-                  {{
-                    course.remainingSessions
-                  }}
-                  堂
-                </span>
-
-                <span>
-                  {{
-                    course.package
-                      .paid
-                      ? '已繳費'
-                      : '未繳費'
-                  }}
-                </span>
-              </div>
-
-              <NuxtLink
-                v-if="
-                  course.canRenew
-                "
-                to="/student"
-                class="renew-hint"
-              >
-                已完成本期堂數，可進行下一期續費
-              </NuxtLink>
-            </div>
-
-            <div
-              v-else
-              class="no-package"
-            >
-              尚未建立堂數方案
-            </div>
-
-            <!-- Schedules -->
-
-            <div
-              v-if="
-                course.schedules
-                  .length
-              "
-              class="schedule-list"
-            >
-              <div
-                v-for="
-                  schedule in
-                    course.schedules
-                "
-                :key="
-                  schedule.schedule_id
-                "
-                class="schedule-row"
-              >
-                <div>
-                  <strong>
-                    {{
-                      getWeekdayLabel(
-                        schedule.weekday
-                      )
-                    }}
-                  </strong>
-
-                  <span>
-                    {{
-                      formatTime(
-                        schedule.start_time
-                      )
-                    }}
-                    -
-                    {{
-                      formatTime(
-                        schedule.end_time
-                      )
-                    }}
-                  </span>
-                </div>
-
-                <span
-                  v-if="
-                    schedule.is_primary
-                  "
-                >
-                  主要
-                </span>
-              </div>
-            </div>
-          </article>
-        </div>
-
-        <div
-          v-else
-          class="empty-state"
-        >
-          目前沒有課程。
-        </div>
-      </section>
-
-      <!-- ====================================================
-           Pending Makeup
-           ==================================================== -->
-
-      <section
-        v-if="
-          dashboard
-            .pendingMakeups
-            .length
-        "
-        class="section"
-      >
-        <div class="section-title-row">
-          <div class="section-title">
-            <span>
-              Pending Makeup
-            </span>
-
-            <h2>
-              待補課
-            </h2>
-          </div>
-
-          <NuxtLink
-            to="/student/makeup"
-          >
-            安排補課
-          </NuxtLink>
-        </div>
-
-        <div class="simple-list">
-          <article
-            v-for="
-              item in
-                dashboard
-                  .pendingMakeups
-            "
-            :key="
-              item.attendance_id
-            "
-          >
-            <div>
-              <strong>
-                {{
-                  item.course_name
-                }}
-              </strong>
-
-              <span>
-                原請假：
-                {{
-                  formatDate(
-                    item.class_date
-                  )
-                }}
-
-                ・
-
-                {{
-                  formatTime(
-                    item.start_time
-                  )
-                }}
-              </span>
-            </div>
-
-            <span class="pending-badge">
-              待補
-            </span>
-          </article>
-        </div>
-      </section>
-
-      <!-- ====================================================
-           Recent Leave / Makeup
-           ==================================================== -->
-
-      <div class="two-section">
-        <!-- Leave -->
-
-        <section class="section">
-          <div class="section-title-row">
-            <div class="section-title">
-              <span>
-                Leave
-              </span>
-
-              <h2>
-                最近請假
-              </h2>
-            </div>
-
-            <NuxtLink
-              to="/student/leave"
-            >
-              全部
-            </NuxtLink>
-          </div>
-
-          <div
-            v-if="
-              dashboard
-                .recentLeaves
-                .length
-            "
-            class="mini-list"
-          >
-            <article
-              v-for="
-                leave in
-                  dashboard
-                    .recentLeaves
-              "
-              :key="
-                leave.id
-              "
-            >
-              <strong>
-                {{
-                  leave.course_name
-                }}
-              </strong>
-
-              <span>
-                {{
-                  leave.item_count
-                }}
-                堂・
-                {{
-                  leave.status ===
-                    'ACTIVE'
-                    ? '有效'
-                    : '已取消'
-                }}
-              </span>
-
-              <p>
-                {{
-                  leave.reason ||
-                  '未填寫原因'
-                }}
-              </p>
-            </article>
-          </div>
-
-          <div
-            v-else
-            class="empty-state"
-          >
-            沒有請假紀錄。
-          </div>
-        </section>
-
-        <!-- Makeup -->
-
-        <section class="section">
-          <div class="section-title-row">
-            <div class="section-title">
-              <span>
-                Makeup
-              </span>
-
-              <h2>
-                最近補課
-              </h2>
-            </div>
-
-            <NuxtLink
-              to="/student/makeup"
-            >
-              全部
-            </NuxtLink>
-          </div>
-
-          <div
-            v-if="
-              dashboard
-                .recentMakeups
-                .length
-            "
-            class="mini-list"
-          >
-            <article
-              v-for="
-                makeup in
-                  dashboard
-                    .recentMakeups
-              "
-              :key="
-                makeup.id
-              "
-            >
-              <strong>
-                {{
-                  makeup.course_name
-                }}
-              </strong>
-
-              <span>
-                {{
-                  formatDate(
-                    makeup.source_class_date
-                  )
-                }}
-                →
-                {{
-                  formatDate(
-                    makeup.makeup_class_date
-                  )
-                }}
-              </span>
-
-              <p>
-                {{
-                  makeup.status ===
-                    'ACTIVE'
-                    ? '有效補課'
-                    : '已取消'
-                }}
-              </p>
-            </article>
-          </div>
-
-          <div
-            v-else
-            class="empty-state"
-          >
-            沒有補課紀錄。
-          </div>
-        </section>
+            </button>
+          </footer>
+        </form>
       </div>
-
-      <!-- ====================================================
-           My Timeline
-           ==================================================== -->
-
-      <section class="section timeline-section">
-        <div class="section-title-row">
-          <div class="section-title">
-            <span>
-              My Timeline
-            </span>
-
-            <h2>
-              最近操作紀錄
-            </h2>
-          </div>
-
-          <NuxtLink
-            to="/student/audit"
-            class="timeline-link"
-          >
-            查看所有 Log
-          </NuxtLink>
-        </div>
-
-        <div
-          v-if="
-            dashboard
-              .recentAudit
-              .length
-          "
-          class="timeline-preview"
-        >
-          <article
-            v-for="
-              log in
-                dashboard
-                  .recentAudit
-            "
-            :key="
-              log.id
-            "
-          >
-            <span class="timeline-dot" />
-
-            <div>
-              <div class="timeline-heading">
-                <strong>
-                  {{
-                    getActionLabel(
-                      log.action
-                    )
-                  }}
-                  ・
-                  {{
-                    getEntityLabel(
-                      log.entity_type
-                    )
-                  }}
-                </strong>
-
-                <span>
-                  {{
-                    getActorLabel(
-                      log.actor_role
-                    )
-                  }}
-                </span>
-              </div>
-
-              <p>
-                {{
-                  log.note ||
-                  '資料異動'
-                }}
-              </p>
-
-              <small>
-                {{
-                  log.course_name ||
-                  ''
-                }}
-
-                {{
-                  formatDateTime(
-                    log.created_at
-                  )
-                }}
-              </small>
-            </div>
-          </article>
-        </div>
-
-        <div
-          v-else
-          class="empty-state"
-        >
-          目前沒有操作紀錄。
-        </div>
-
-        <NuxtLink
-          to="/student/audit"
-          class="all-log-button"
-        >
-          查看我的完整 Timeline
-        </NuxtLink>
-      </section>
-    </div>
+    </Teleport>
   </main>
 </template>
 
 <style scoped>
-.student-dashboard {
+.student-page {
   min-height: 100vh;
-  padding:
-    20px
-    14px
-    50px;
-  background: #f7f7f7;
+  padding: 24px 16px 60px;
+  background: #f6f6f6;
   color: #222222;
 }
 
 .container {
   width: 100%;
-  max-width: 620px;
+  max-width: 1050px;
   margin: 0 auto;
 }
 
@@ -1139,501 +1257,480 @@ onMounted(
    Header
    ============================================================ */
 
-.page-header {
+.page-header > div > span {
+  color: #999999;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.page-header h1 {
+  margin: 4px 0 0;
+  font-size: 28px;
+}
+
+.page-header p {
+  margin: 5px 0 0;
+  color: #888888;
+  font-size: 9px;
+}
+
+/* ============================================================
+   Message
+   ============================================================ */
+
+.error-message,
+.success-message {
+  margin-top: 11px;
+  padding: 10px;
+  border-radius: 9px;
+  font-size: 9px;
+}
+
+.error-message {
+  background: #fff0f0;
+  color: #c94343;
+}
+
+.success-message {
+  background: #eaf7ec;
+  color: #418b4b;
+}
+
+/* ============================================================
+   Sections
+   ============================================================ */
+
+.section {
+  margin-top: 20px;
+}
+
+.section-header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
 }
 
-.page-header > div > span,
-.section-title > span {
+.section-header > div > span {
   color: #999999;
-  font-size: 9px;
+  font-size: 8px;
   letter-spacing: 1px;
 }
 
-.page-header h1 {
-  margin: 4px 0 0;
-  font-size: 24px;
+.section-header h2 {
+  margin: 3px 0 0;
+  font-size: 18px;
 }
 
-.page-header p {
+.section-header p {
   margin: 4px 0 0;
-  color: #888888;
-  font-size: 9px;
+  color: #999999;
+  font-size: 8px;
 }
 
-.refresh-button {
-  min-height: 36px;
-  padding: 0 11px;
-  border: 0;
-  background: #eeeeee;
-  border-radius: 9px;
-  font-size: 9px;
+.log-count {
+  color: #999999;
+  font-size: 8px;
 }
 
 /* ============================================================
-   Navigation
+   Filters
    ============================================================ */
 
-.navigation-grid {
+.filters {
   display: grid;
   grid-template-columns:
+    2fr
     1fr
-    1fr;
-  gap: 8px;
-  margin-top: 17px;
-}
-
-.navigation-grid a {
-  padding: 13px;
+    auto
+    auto;
+  gap: 7px;
+  margin: 10px 0 9px;
+  padding: 10px;
   background: #ffffff;
-  border: 1px solid #eeeeee;
-  border-radius: 14px;
-  color: #222222;
-  text-decoration: none;
+  border-radius: 11px;
 }
 
-.navigation-grid span {
-  display: block;
-  color: #999999;
-  font-size: 8px;
-}
-
-.navigation-grid strong {
-  display: block;
-  margin-top: 5px;
-  font-size: 10px;
-}
-
-.navigation-grid .audit-link {
-  background: #222222;
-  color: #ffffff;
-}
-
-.navigation-grid .audit-link span {
-  color:
-    rgb(
-      255
-      255
-      255
-      /
-      55%
-    );
-}
-
-/* ============================================================
-   Section
-   ============================================================ */
-
-.section {
-  margin-top: 19px;
-}
-
-.section-title h2 {
-  margin: 3px 0 9px;
-  font-size: 16px;
-}
-
-.section-title-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.section-title-row a {
-  margin-bottom: 9px;
-  color: #777777;
-  font-size: 9px;
-  text-decoration: none;
-}
-
-/* ============================================================
-   Next
-   ============================================================ */
-
-.next-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 13px;
-  padding: 17px;
-  background: #222222;
-  border-radius: 17px;
-  color: #ffffff;
-}
-
-.next-card > div {
+.filters label {
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 
-.next-card strong {
-  font-size: 12px;
+.filters label span {
+  color: #888888;
+  font-size: 7px;
 }
 
-.next-card span {
-  margin-top: 4px;
-  color:
-    rgb(
-      255
-      255
-      255
-      /
-      65%
-    );
-  font-size: 9px;
-}
-
-.next-card small {
-  margin-top: 5px;
-  color:
-    rgb(
-      255
-      255
-      255
-      /
-      45%
-    );
-  font-size: 8px;
-}
-
-.next-time {
-  align-items: flex-end;
-}
-
-/* ============================================================
-   Course
-   ============================================================ */
-
-.course-list {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.course-card {
-  padding: 15px;
+.filters select {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid #dddddd;
   background: #ffffff;
-  border-radius: 16px;
-}
-
-.course-card > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.course-card header span {
-  color: #999999;
+  border-radius: 8px;
   font-size: 8px;
 }
 
-.course-card h3 {
-  margin: 3px 0 0;
-  font-size: 14px;
-}
-
-.renew-badge {
-  padding: 5px 8px;
-  background: #fff3d9;
-  border-radius: 999px;
-  color: #94701d !important;
-}
-
-.package-area {
-  margin-top: 12px;
-  padding: 12px;
-  background: #f7f7f7;
-  border-radius: 12px;
-}
-
-.package-number {
-  display: flex;
-  align-items: baseline;
-}
-
-.package-number strong {
-  font-size: 24px;
-}
-
-.package-number span {
-  margin-left: 4px;
-  color: #888888;
-  font-size: 10px;
-}
-
-.progress-track {
-  height: 6px;
-  margin-top: 9px;
-  overflow: hidden;
-  background: #dddddd;
-  border-radius: 999px;
-}
-
-.progress-value {
-  height: 100%;
-  background: #222222;
-  border-radius: inherit;
-}
-
-.package-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 12px;
-  margin-top: 8px;
-  color: #888888;
-  font-size: 8px;
-}
-
-.renew-hint {
-  display: block;
-  margin-top: 10px;
-  padding: 8px;
+.filters button {
+  align-self: flex-end;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 0;
   background: #222222;
   border-radius: 8px;
   color: #ffffff;
   font-size: 8px;
-  text-align: center;
-  text-decoration: none;
 }
 
-.no-package {
-  margin-top: 11px;
+.filters button.secondary {
+  background: #eeeeee;
+  color: #555555;
+}
+
+/* ============================================================
+   Audit
+   ============================================================ */
+
+.audit-section {
+  margin-top: 28px;
+}
+
+.audit-table-wrapper {
+  overflow-x: auto;
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.audit-table th,
+.audit-table td {
   padding: 10px;
-  background: #fff5e9;
-  border-radius: 10px;
-  color: #977044;
-  font-size: 9px;
+  border-bottom: 1px solid #eeeeee;
+  text-align: left;
+  vertical-align: top;
 }
 
-.schedule-list {
-  margin-top: 10px;
-}
-
-.schedule-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 39px;
-  border-top: 1px solid #eeeeee;
-}
-
-.schedule-row > div {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.schedule-row strong {
-  font-size: 9px;
-}
-
-.schedule-row div span,
-.schedule-row > span {
-  color: #999999;
-  font-size: 8px;
-}
-
-/* ============================================================
-   Pending
-   ============================================================ */
-
-.simple-list,
-.mini-list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.simple-list article {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 9px;
-  padding: 12px;
-  background: #ffffff;
-  border-radius: 12px;
-}
-
-.simple-list article > div {
-  display: flex;
-  flex-direction: column;
-}
-
-.simple-list strong {
-  font-size: 10px;
-}
-
-.simple-list span {
-  margin-top: 3px;
+.audit-table th {
+  background: #fafafa;
   color: #888888;
-  font-size: 8px;
+  font-size: 7px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.pending-badge {
-  padding: 5px 7px;
-  background: #fff3d9;
-  border-radius: 999px;
-  color: #91701e !important;
-}
-
-/* ============================================================
-   Two Section
-   ============================================================ */
-
-.two-section {
-  display: grid;
-  grid-template-columns:
-    1fr
-    1fr;
-  gap: 10px;
-}
-
-.mini-list article {
-  padding: 12px;
-  background: #ffffff;
-  border-radius: 12px;
-}
-
-.mini-list strong {
-  display: block;
-  font-size: 10px;
-}
-
-.mini-list span {
-  display: block;
-  margin-top: 4px;
-  color: #888888;
-  font-size: 8px;
-}
-
-.mini-list p {
-  margin: 6px 0 0;
+.audit-table td {
   color: #666666;
   font-size: 8px;
 }
 
-/* ============================================================
-   Timeline
-   ============================================================ */
-
-.timeline-section {
-  padding-top: 4px;
+.audit-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
-.timeline-link {
-  font-weight: 600;
-}
-
-.timeline-preview {
-  position: relative;
-  padding-left: 19px;
-}
-
-.timeline-preview::before {
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 5px;
-  width: 1px;
-  background: #dddddd;
-  content: '';
-}
-
-.timeline-preview article {
-  position: relative;
-  margin-bottom: 8px;
-  padding: 11px;
-  background: #ffffff;
-  border-radius: 12px;
-}
-
-.timeline-dot {
-  position: absolute;
-  top: 15px;
-  left: -18px;
-  z-index: 1;
-  width: 9px;
-  height: 9px;
-  background: #ffffff;
-  border: 2px solid #777777;
-  border-radius: 50%;
-}
-
-.timeline-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.timeline-heading strong {
-  font-size: 9px;
-}
-
-.timeline-heading span {
-  color: #999999;
+.audit-table strong {
+  color: #333333;
   font-size: 8px;
 }
 
-.timeline-preview p {
-  margin: 5px 0 0;
-  color: #666666;
-  font-size: 8px;
-}
-
-.timeline-preview small {
+.audit-table small {
   display: block;
-  margin-top: 5px;
+  margin-top: 2px;
   color: #aaaaaa;
-  font-size: 8px;
-}
-
-.all-log-button {
-  display: block;
-  margin-top: 9px;
-  padding: 11px;
-  background: #222222;
-  border-radius: 11px;
-  color: #ffffff;
-  font-size: 9px;
-  text-align: center;
-  text-decoration: none;
+  font-size: 7px;
 }
 
 /* ============================================================
-   Common
+   Empty
    ============================================================ */
 
 .empty-state {
-  padding: 25px;
+  margin-top: 12px;
+  padding: 30px;
   background: #ffffff;
-  border-radius: 14px;
+  border-radius: 13px;
   color: #aaaaaa;
   font-size: 9px;
   text-align: center;
 }
 
-.error-message {
-  margin-top: 11px;
-  padding: 10px;
-  background: #fff0f0;
+.empty-state.compact {
+  margin-top: 9px;
+  padding: 20px;
+}
+
+/* ============================================================
+   Dialog
+   ============================================================ */
+
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 17px;
+  background: rgb(0 0 0 / 48%);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 470px;
+  max-height: calc(100vh - 34px);
+  overflow-y: auto;
+  padding: 19px;
+  background: #ffffff;
+  border-radius: 19px;
+}
+
+.dialog > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog header span {
+  color: #999999;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.dialog h2 {
+  margin: 3px 0 0;
+}
+
+.dialog header button {
+  width: 33px;
+  height: 33px;
+  border: 0;
+  background: #eeeeee;
+  border-radius: 50%;
+}
+
+.reset-course {
+  margin-top: 13px;
+  padding: 11px;
+  background: #f7f7f7;
   border-radius: 10px;
-  color: #c94343;
+}
+
+.reset-course span {
+  color: #999999;
+  font-size: 7px;
+}
+
+.reset-course strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.reset-course p {
+  margin: 4px 0 0;
+  color: #777777;
+  font-size: 8px;
+}
+
+.dialog > label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.dialog label span {
+  color: #777777;
+  font-size: 8px;
+}
+
+.dialog input {
+  min-height: 39px;
+  padding: 0 9px;
+  border: 1px solid #dddddd;
+  background: #ffffff;
+  border-radius: 9px;
+}
+
+.cycle-buttons {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      3,
+      1fr
+    );
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.cycle-buttons button {
+  min-height: 34px;
+  border: 0;
+  background: #eeeeee;
+  border-radius: 8px;
+  color: #666666;
+  font-size: 8px;
+}
+
+.cycle-buttons button.selected {
+  background: #222222;
+  color: #ffffff;
+}
+
+.reset-preview {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      3,
+      1fr
+    );
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  background: #222222;
+  border-radius: 10px;
+}
+
+.reset-preview > div {
+  padding: 8px;
+  background: rgb(255 255 255 / 8%);
+  border-radius: 7px;
+}
+
+.reset-preview span {
+  display: block;
+  color: rgb(255 255 255 / 50%);
+  font-size: 7px;
+}
+
+.reset-preview strong {
+  display: block;
+  margin-top: 3px;
+  color: #ffffff;
   font-size: 9px;
 }
 
+.payment-notice {
+  margin-top: 10px;
+  padding: 10px;
+  background: #fff5df;
+  border-radius: 9px;
+}
+
+.payment-notice strong {
+  color: #856319;
+  font-size: 8px;
+}
+
+.payment-notice p {
+  margin: 4px 0 0;
+  color: #8d7541;
+  font-size: 7px;
+  line-height: 1.6;
+}
+
+.dialog footer {
+  display: grid;
+  grid-template-columns:
+    1fr
+    2fr;
+  gap: 7px;
+  margin-top: 15px;
+}
+
+.dialog footer button {
+  min-height: 40px;
+  border: 0;
+  background: #eeeeee;
+  border-radius: 9px;
+}
+
+.dialog footer .confirm {
+  background: #222222;
+  color: #ffffff;
+}
+
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
+}
+
+/* ============================================================
+   Mobile
+   ============================================================ */
+
+@media (
+  max-width: 650px
+) {
+  .filters {
+    grid-template-columns:
+      1fr
+      1fr;
+  }
+
+  .filters button {
+    align-self: stretch;
+  }
+
+  .audit-table-wrapper {
+    overflow: visible;
+  }
+
+  .audit-table,
+  .audit-table thead,
+  .audit-table tbody,
+  .audit-table tr,
+  .audit-table th,
+  .audit-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .audit-table {
+    background: transparent;
+  }
+
+  .audit-table thead {
+    display: none;
+  }
+
+  .audit-table tr {
+    margin-bottom: 7px;
+    padding: 11px;
+    background: #ffffff;
+    border-radius: 11px;
+  }
+
+  .audit-table td {
+    display: grid;
+    grid-template-columns:
+      75px
+      1fr;
+    gap: 8px;
+    padding: 5px 0;
+    border: 0;
+  }
+
+  .audit-table td::before {
+    content:
+      attr(
+        data-label
+      );
+    color: #aaaaaa;
+    font-size: 7px;
+  }
 }
 
 @media (
   max-width: 480px
 ) {
-  .two-section {
+  .student-page {
+    padding: 18px 12px 45px;
+  }
+
+  .reset-preview {
     grid-template-columns:
       1fr;
   }

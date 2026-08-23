@@ -1,6 +1,14 @@
 import {
-  createStudentPackage,
-} from '../../../../../services/packageService.js'
+  requireAuth,
+} from '../../../../../utils/authSession.js'
+
+import {
+  getAuditRequestMetadata,
+} from '../../../../../services/auditService.js'
+
+import {
+  createStudentPackagePurchase,
+} from '../../../../../services/studentPackagePurchaseService.js'
 
 export default defineEventHandler(
   async (
@@ -23,7 +31,7 @@ export default defineEventHandler(
         statusCode: 403,
 
         statusMessage:
-          '只有老師可以建立學生 Package',
+          '只有老師可以替學生建立課程方案',
       })
     }
 
@@ -36,30 +44,23 @@ export default defineEventHandler(
         getRouterParam(
           event,
           'id'
-        ) || ''
-      )
-        .trim()
+        ) ||
+        ''
+      ).trim()
 
-    if (!studentId) {
+    if (
+      !studentId
+    ) {
       throw createError({
         statusCode: 400,
 
         statusMessage:
-          '缺少學生 ID',
+          '缺少 Student ID',
       })
     }
 
     // ========================================================
     // Body
-    //
-    // {
-    //   courseId,
-    //   startDate,
-    //   totalSessions,
-    //   price,
-    //   paid,
-    //   bankAccountId
-    // }
     // ========================================================
 
     const body =
@@ -71,88 +72,81 @@ export default defineEventHandler(
       String(
         body?.courseId ||
         ''
+      ).trim()
+
+    const startDate =
+      String(
+        body?.startDate ||
+        ''
+      ).trim()
+
+    if (
+      !courseId
+    ) {
+      throw createError({
+        statusCode: 400,
+
+        statusMessage:
+          '請選擇課堂',
+      })
+    }
+
+    if (
+      !startDate
+    ) {
+      throw createError({
+        statusCode: 400,
+
+        statusMessage:
+          '請選擇學生開始日期',
+      })
+    }
+
+    // ========================================================
+    // Audit Metadata
+    // ========================================================
+
+    const auditMetadata =
+      getAuditRequestMetadata(
+        event
       )
-        .trim()
 
-    if (!courseId) {
-      throw createError({
-        statusCode: 400,
+    // ========================================================
+    // Create Package
+    // ========================================================
 
-        statusMessage:
-          '請選擇課程',
-      })
-    }
-
-    if (
-      body?.totalSessions ===
-        undefined ||
-      body?.totalSessions ===
-        null ||
-      body?.totalSessions ===
-        ''
-    ) {
-      throw createError({
-        statusCode: 400,
-
-        statusMessage:
-          '請輸入總堂數',
-      })
-    }
-
-    if (
-      body?.price ===
-        undefined ||
-      body?.price ===
-        null ||
-      body?.price ===
-        ''
-    ) {
-      throw createError({
-        statusCode: 400,
-
-        statusMessage:
-          '請輸入價格',
-      })
-    }
-
-    const packageData =
-      await createStudentPackage({
+    const result =
+      await createStudentPackagePurchase({
         studentId,
 
         courseId,
 
-        startDate:
-          body?.startDate,
+        startDate,
 
-        totalSessions:
-          body
-            ?.totalSessions,
-
-        price:
-          body?.price,
+        purchasedCycles:
+          body?.purchasedCycles,
 
         paid:
-          Boolean(
-            body?.paid
-          ),
-
-        bankAccountId:
-          body
-            ?.bankAccountId ||
-          null,
+          body?.paid ??
+          true,
 
         actorUserId:
           user.id,
+
+        auditMetadata,
       })
 
     return {
       success: true,
 
       message:
-        '學生第一期 Package 建立成功',
+        `方案建立完成：${result.calculation.purchasedCycles} 期，共 ${result.calculation.totalSessions} 堂，總額 ${result.calculation.totalPrice}`,
 
       package:
-        packageData,
+        result.package,
+
+      calculation:
+        result.calculation,
     }
   }
 )

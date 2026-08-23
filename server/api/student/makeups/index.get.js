@@ -1,10 +1,6 @@
 import {
-  requireAuth,
-} from '../../../utils/authSession.js'
-
-import {
-  useDatabase,
-} from '../../../utils/db.js'
+  requireStudentContext,
+} from '../../../utils/authContext.js'
 
 import {
   getStudentMakeupData,
@@ -16,135 +12,40 @@ export default defineEventHandler(
   ) => {
     // ========================================================
     // Student Auth
+    //
+    // Student ID 永遠由登入 Session 取得。
+    // 前端不能指定其他學生。
     // ========================================================
 
-    const user =
-      await requireAuth(
+    const context =
+      await requireStudentContext(
         event
       )
 
-    if (
-      user.role !==
-      'STUDENT'
-    ) {
-      throw createError({
-        statusCode: 403,
-
-        statusMessage:
-          '只有學生可以查看自己的補課資料',
-      })
-    }
-
-    const sql =
-      useDatabase()
-
-    // ========================================================
-    // Login User → Student
-    // ========================================================
-
-    const students =
-      await sql`
-        SELECT
-          id,
-          name,
-          status
-
-        FROM
-          students
-
-        WHERE
-          user_id =
-            ${user.id}
-
-        LIMIT 1
-      `
-
-    if (
-      !students.length
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          '此 LINE 帳號尚未綁定學生資料',
-      })
-    }
-
     const student =
-      students[0]
-
-    if (
-      student.status !==
-      'ACTIVE'
-    ) {
-      throw createError({
-        statusCode: 403,
-
-        statusMessage:
-          '學生資料目前未啟用',
-      })
-    }
+      context.student
 
     // ========================================================
     // Makeup Data
     // ========================================================
 
     const result =
-      await getStudentMakeupData(
-        student.id
-      )
-
-    // ========================================================
-    // Summary
-    // ========================================================
-
-    const summary = {
-      total:
-        result.makeups.length,
-
-      active:
-        result.makeups.filter(
-          (
-            makeup
-          ) => {
-            return (
-              makeup.status ===
-              'ACTIVE'
-            )
-          }
-        ).length,
-
-      cancelled:
-        result.makeups.filter(
-          (
-            makeup
-          ) => {
-            return (
-              makeup.status ===
-              'CANCELLED'
-            )
-          }
-        ).length,
-
-      availableLeaves:
-        result.leaves.length,
-    }
+      await getStudentMakeupData({
+        studentId:
+          student.id,
+      })
 
     return {
       success: true,
 
-      student,
+      student:
+        result.student,
 
-      summary,
+      sourceLeaves:
+        result.sourceLeaves,
 
       makeups:
         result.makeups,
-
-      leaves:
-        result.leaves,
-
-      sessions:
-        result.sessions,
     }
   }
 )

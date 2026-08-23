@@ -30,35 +30,21 @@ const assertUuid = (
 }
 
 // ============================================================
-// Transaction
-// ============================================================
-
-const runTransaction =
-  async (
-    sql,
-    queries
-  ) => {
-    if (
-      typeof sql.transaction !==
-      'function'
-    ) {
-      throw createError({
-        statusCode: 500,
-
-        statusMessage:
-          '目前資料庫連線不支援 Transaction',
-      })
-    }
-
-    return await sql.transaction(
-      queries
-    )
-  }
-
-// ============================================================
-// Package State Query
+// Package Usage Query
 //
-// 這支 Query 可以被放進其他 Transaction。
+// 唯一堂數來源：
+//
+// attendance_records_v2
+// status = ATTENDED
+//
+// 不管：
+//
+// NORMAL
+// MAKEUP
+// MANUAL
+//
+// 只要是真的 ATTENDED
+// 都算消耗一堂。
 // ============================================================
 
 export const createPackageStateRecalculationQuery =
@@ -83,11 +69,17 @@ export const createPackageStateRecalculationQuery =
 
           package.cycle_no,
 
+          package.purchased_cycles,
+
+          package.sessions_per_cycle,
+
           package.total_sessions,
 
           package.status,
 
-          package.completion_reason
+          package.completion_reason,
+
+          package.completed_at
 
         FROM
           student_packages package
@@ -102,7 +94,7 @@ export const createPackageStateRecalculationQuery =
       usage_data AS (
         SELECT
           COUNT(*)::INTEGER
-            AS attended_count
+            AS used_sessions
 
         FROM
           attendance_records_v2 attendance
@@ -123,20 +115,17 @@ export const createPackageStateRecalculationQuery =
               1
 
             FROM
-              student_packages successor
+              student_packages successor,
 
-            INNER JOIN
               target
 
-              ON successor.student_id =
+            WHERE
+              successor.student_id =
                 target.student_id
 
-              AND successor.course_id =
-                target.course_id
-
-            WHERE
-              successor.status <>
-                'CANCELLED'
+              AND
+                successor.course_id =
+                  target.course_id
 
               AND (
                 successor.previous_package_id =
@@ -150,21 +139,21 @@ export const createPackageStateRecalculationQuery =
                 )
               )
           )
-            AS has_successor
+            AS has_any_successor
       ),
 
       calculated AS (
         SELECT
           target.*,
 
-          usage_data.attended_count,
+          usage_data.used_sessions,
 
-          successor_data.has_successor,
+          successor_data.has_any_successor,
 
           CASE
 
             -- =================================================
-            -- CANCELLED 永遠保持 CANCELLED
+            -- 手動取消的 Package 永遠保持 CANCELLED
             -- =================================================
 
             WHEN
@@ -176,11 +165,11 @@ export const createPackageStateRecalculationQuery =
 
 
             -- =================================================
-            -- 堂數滿
+            -- 真正累積到總堂數
             -- =================================================
 
             WHEN
-              usage_data.attended_count >=
+              usage_data.used_sessions >=
               target.total_sessions
 
             THEN
@@ -188,14 +177,14 @@ export const createPackageStateRecalculationQuery =
 
 
             -- =================================================
-            -- 歷史 Package 已經有下一期
+            -- 已經建立下一次付款的新 Package
             --
-            -- 即使 Attendance 後來減少，
+            -- 歷史資料即使被修改，
             -- 也不能重新 ACTIVE。
             -- =================================================
 
             WHEN
-              successor_data.has_successor =
+              successor_data.has_any_successor =
                 TRUE
 
             THEN
@@ -203,10 +192,11 @@ export const createPackageStateRecalculationQuery =
 
 
             -- =================================================
-            -- 沒 successor，
-            -- 而且以前只是因為堂數滿才 COMPLETED，
-            -- 現在堂數又被修正降低，
-            -- 才允許恢復 ACTIVE。
+            -- 沒有下一期
+            --
+            -- 如果原本是因堂數用完而 COMPLETED，
+            -- 後來 Attendance 被修正，
+            -- 才可以恢復 ACTIVE。
             -- =================================================
 
             WHEN
@@ -218,7 +208,7 @@ export const createPackageStateRecalculationQuery =
                   'SESSIONS_USED_UP'
 
               AND
-                usage_data.attended_count <
+                usage_data.used_sessions <
                   target.total_sessions
 
             THEN
@@ -242,7 +232,7 @@ export const createPackageStateRecalculationQuery =
 
 
             WHEN
-              usage_data.attended_count >=
+              usage_data.used_sessions >=
               target.total_sessions
 
             THEN
@@ -250,7 +240,7 @@ export const createPackageStateRecalculationQuery =
 
 
             WHEN
-              successor_data.has_successor =
+              successor_data.has_any_successor =
                 FALSE
 
               AND
@@ -262,7 +252,7 @@ export const createPackageStateRecalculationQuery =
                   'SESSIONS_USED_UP'
 
               AND
-                usage_data.attended_count <
+                usage_data.used_sessions <
                   target.total_sessions
 
             THEN
@@ -273,7 +263,56 @@ export const createPackageStateRecalculationQuery =
               target.completion_reason
 
           END
-            AS next_completion_reason
+            AS next_completion_reason,
+
+          CASE
+
+            -- =================================================
+            -- 第一次真正達到總堂數
+            -- =================================================
+
+            WHEN
+              usage_data.used_sessions >=
+                target.total_sessions
+
+              AND
+                target.completed_at IS NULL
+
+            THEN
+              NOW()
+
+
+            -- =================================================
+            -- 沒有 successor，
+            -- 且堂數因修正而重新 ACTIVE，
+            -- 清掉 completed_at。
+            -- =================================================
+
+            WHEN
+              successor_data.has_any_successor =
+                FALSE
+
+              AND
+                target.status =
+                  'COMPLETED'
+
+              AND
+                target.completion_reason =
+                  'SESSIONS_USED_UP'
+
+              AND
+                usage_data.used_sessions <
+                  target.total_sessions
+
+            THEN
+              NULL
+
+
+            ELSE
+              target.completed_at
+
+          END
+            AS next_completed_at
 
         FROM
           target,
@@ -291,6 +330,9 @@ export const createPackageStateRecalculationQuery =
         completion_reason =
           calculated.next_completion_reason,
 
+        completed_at =
+          calculated.next_completed_at,
+
         updated_at =
           NOW()
 
@@ -307,7 +349,7 @@ export const createPackageStateRecalculationQuery =
   }
 
 // ============================================================
-// Get Package State
+// Package State
 // ============================================================
 
 export const getPackageState =
@@ -325,13 +367,53 @@ export const getPackageState =
     const rows =
       await sql`
         SELECT
-          package.*,
+          package.id,
+
+          package.student_id,
+
+          package.course_id,
+
+          package.cycle_no,
+
+          package.previous_package_id,
+
+          package.start_date,
+
+          package.purchased_cycles,
+
+          package.sessions_per_cycle,
+
+          package.total_sessions,
+
+          package.price_per_cycle,
+
+          package.price,
+
+          package.status,
+
+          package.paid,
+
+          package.paid_at,
+
+          package.completion_reason,
+
+          package.completed_at,
+
+          package.created_at,
+
+          package.updated_at,
+
+          student.name
+            AS student_name,
 
           course.name
             AS course_name,
 
-          student.name
-            AS student_name,
+          course.weekday,
+
+          course.start_time,
+
+          course.end_time,
 
           COALESCE(
             COUNT(attendance.id)
@@ -342,7 +424,44 @@ export const getPackageState =
               ),
             0
           )::INTEGER
-            AS attended_count,
+            AS used_sessions,
+
+          COALESCE(
+            COUNT(attendance.id)
+              FILTER (
+                WHERE
+                  attendance.status =
+                    'LEAVE'
+              ),
+            0
+          )::INTEGER
+            AS leave_count,
+
+          COALESCE(
+            COUNT(attendance.id)
+              FILTER (
+                WHERE
+                  attendance.status =
+                    'ABSENT'
+              ),
+            0
+          )::INTEGER
+            AS absent_count,
+
+          COALESCE(
+            COUNT(attendance.id)
+              FILTER (
+                WHERE
+                  attendance.status =
+                    'ATTENDED'
+
+                  AND
+                    attendance.attendance_type =
+                      'MAKEUP'
+              ),
+            0
+          )::INTEGER
+            AS makeup_used_sessions,
 
           EXISTS (
             SELECT
@@ -358,10 +477,6 @@ export const getPackageState =
               AND
                 successor.course_id =
                   package.course_id
-
-              AND
-                successor.status <>
-                  'CANCELLED'
 
               AND (
                 successor.previous_package_id =
@@ -424,13 +539,13 @@ export const getPackageState =
     const packageData =
       rows[0]
 
-    const attended =
+    const usedSessions =
       Number(
-        packageData.attended_count ||
+        packageData.used_sessions ||
         0
       )
 
-    const total =
+    const totalSessions =
       Number(
         packageData.total_sessions ||
         0
@@ -439,35 +554,48 @@ export const getPackageState =
     return {
       ...packageData,
 
-      attended_count:
-        attended,
+      used_sessions:
+        usedSessions,
 
       remaining_sessions:
         Math.max(
-          total -
-          attended,
+          totalSessions -
+          usedSessions,
           0
         ),
 
+      usage_percent:
+        totalSessions >
+          0
+          ? Math.min(
+              Math.round(
+                usedSessions /
+                totalSessions *
+                100
+              ),
+              100
+            )
+          : 0,
+
       is_full:
-        total >
+        totalSessions >
           0 &&
-        attended >=
-          total,
+        usedSessions >=
+          totalSessions,
 
       can_renew:
-        total >
+        totalSessions >
           0 &&
-        attended >=
-          total &&
-        !packageData.has_successor &&
+        usedSessions >=
+          totalSessions &&
         packageData.status !==
-          'CANCELLED',
+          'CANCELLED' &&
+        !packageData.has_successor,
     }
   }
 
 // ============================================================
-// Recalculate One Package
+// Recalculate Package
 // ============================================================
 
 export const recalculatePackageState =
@@ -482,14 +610,9 @@ export const recalculatePackageState =
     const sql =
       useDatabase()
 
-    await runTransaction(
+    await createPackageStateRecalculationQuery(
       sql,
-      [
-        createPackageStateRecalculationQuery(
-          sql,
-          packageId
-        ),
-      ]
+      packageId
     )
 
     return await getPackageState(
@@ -498,7 +621,7 @@ export const recalculatePackageState =
   }
 
 // ============================================================
-// Recalculate Multiple Packages
+// Recalculate Multiple
 // ============================================================
 
 export const recalculatePackageStates =
@@ -521,11 +644,10 @@ export const recalculatePackageStates =
             .map(
               (
                 value
-              ) => {
-                return String(
+              ) =>
+                String(
                   value
                 ).trim()
-              }
             )
         ),
       ]
@@ -536,6 +658,8 @@ export const recalculatePackageStates =
       return []
     }
 
+    const result = []
+
     for (
       const packageId of
       uniqueIds
@@ -544,36 +668,9 @@ export const recalculatePackageStates =
         packageId,
         'Package ID'
       )
-    }
 
-    const sql =
-      useDatabase()
-
-    const queries =
-      uniqueIds.map(
-        (
-          packageId
-        ) => {
-          return createPackageStateRecalculationQuery(
-            sql,
-            packageId
-          )
-        }
-      )
-
-    await runTransaction(
-      sql,
-      queries
-    )
-
-    const result = []
-
-    for (
-      const packageId of
-      uniqueIds
-    ) {
       result.push(
-        await getPackageState(
+        await recalculatePackageState(
           packageId
         )
       )

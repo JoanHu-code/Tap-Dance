@@ -4,6 +4,10 @@ definePageMeta({
     'teacher-auth',
 })
 
+// ============================================================
+// Route
+// ============================================================
+
 const route =
   useRoute()
 
@@ -15,13 +19,20 @@ const studentId =
     )
   })
 
+// ============================================================
+// State
+// ============================================================
+
 const loading =
   ref(true)
 
-const saving =
+const actionSaving =
   ref(false)
 
-const enrollmentSaving =
+const historySavingId =
+  ref('')
+
+const packageSaving =
   ref(false)
 
 const errorMessage =
@@ -33,147 +44,79 @@ const successMessage =
 const student =
   ref(null)
 
-const enrollments =
+const courses =
   ref([])
 
 const packages =
   ref([])
 
-const attendanceRecords =
+const attendance =
   ref([])
 
-const availableCourses =
-  ref([])
+// ============================================================
+// Package Dialog
+// ============================================================
 
-const availableSchedules =
-  ref([])
-
-const showEditDialog =
+const showPackageDialog =
   ref(false)
 
-const showEnrollmentDialog =
-  ref(false)
-
-const editForm =
-  reactive({
-    name: '',
-  })
-
-const enrollmentForm =
-  reactive({
-    courseId: '',
-    scheduleId: '',
-  })
-
-let toastTimer =
-  null
+const selectedRenewPackage =
+  ref(null)
 
 // ============================================================
-// Name
+// Packages
 // ============================================================
 
-const studentName =
+const activePackages =
   computed(() => {
-    return (
-      student.value
-        ?.name ||
-      `學生 #${studentId.value}`
+    return packages.value.filter(
+      (
+        item
+      ) => {
+        return (
+          item.status ===
+          'ACTIVE'
+        )
+      }
     )
   })
 
-// ============================================================
-// LINE
-// ============================================================
-
-const isLineLinked =
+const completedPackages =
   computed(() => {
-    return Boolean(
-      student.value
-        ?.user_id
+    return packages.value.filter(
+      (
+        item
+      ) => {
+        return (
+          item.status !==
+          'ACTIVE'
+        )
+      }
     )
   })
 
 // ============================================================
-// Weekday
+// Error
 // ============================================================
 
-const getWeekdayLabel =
-  (
-    weekday
-  ) => {
-    const map = {
-      1: '星期一',
-      2: '星期二',
-      3: '星期三',
-      4: '星期四',
-      5: '星期五',
-      6: '星期六',
-      7: '星期日',
-    }
-
-    return (
-      map[
-        Number(
-          weekday
-        )
-      ] ||
-      ''
-    )
-  }
+const getErrorMessage = (
+  error,
+  fallback
+) => {
+  return (
+    error?.data
+      ?.statusMessage ||
+    error?.statusMessage ||
+    error?.message ||
+    fallback
+  )
+}
 
 // ============================================================
-// Money
+// Load
 // ============================================================
 
-const formatMoney =
-  (
-    value
-  ) => {
-    return new Intl
-      .NumberFormat(
-        'zh-TW'
-      )
-      .format(
-        Number(
-          value || 0
-        )
-      )
-  }
-
-// ============================================================
-// Toast
-// ============================================================
-
-const showToast =
-  (
-    text
-  ) => {
-    successMessage.value =
-      text
-
-    if (
-      toastTimer
-    ) {
-      window.clearTimeout(
-        toastTimer
-      )
-    }
-
-    toastTimer =
-      window.setTimeout(
-        () => {
-          successMessage.value =
-            ''
-        },
-        2400
-      )
-  }
-
-// ============================================================
-// Fetch
-// ============================================================
-
-const fetchStudent =
+const loadWorkspace =
   async () => {
     loading.value =
       true
@@ -184,47 +127,37 @@ const fetchStudent =
     try {
       const response =
         await $fetch(
-          `/api/teacher/students/${studentId.value}`
+          `/api/teacher/workspace/${studentId.value}`
         )
 
       student.value =
         response.student ||
         null
 
-      enrollments.value =
-        response.enrollments ||
+      courses.value =
+        response.courses ||
         []
 
       packages.value =
         response.packages ||
         []
 
-      attendanceRecords.value =
-        response
-          .attendanceRecords ||
+      attendance.value =
+        response.attendance ||
         []
-
-      availableCourses.value =
-        response
-          .availableCourses ||
-        []
-
-      availableSchedules.value =
-        response
-          .availableSchedules ||
-        []
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
-        '學生詳情載入失敗：',
+        '學生工作區載入失敗：',
         error
       )
 
       errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.statusMessage ||
-        error?.message ||
-        '學生資料載入失敗'
+        getErrorMessage(
+          error,
+          '學生資料載入失敗'
+        )
     } finally {
       loading.value =
         false
@@ -232,257 +165,416 @@ const fetchStudent =
   }
 
 // ============================================================
-// Edit Student
+// Attendance
 // ============================================================
 
-const openEditDialog =
-  () => {
-    editForm.name =
-      student.value
-        ?.name ||
+const submitAttendance =
+  async (
+    payload
+  ) => {
+    if (
+      actionSaving.value
+    ) {
+      return
+    }
+
+    actionSaving.value =
+      true
+
+    errorMessage.value =
       ''
 
-    showEditDialog.value =
-      true
-  }
-
-const saveStudent =
-  async () => {
-    const name =
-      editForm.name
-        .trim()
-
-    if (!name) {
-      errorMessage.value =
-        '請輸入學生姓名'
-
-      return
-    }
-
-    saving.value =
-      true
+    successMessage.value =
+      ''
 
     try {
-      await $fetch(
-        `/api/teacher/students/${studentId.value}`,
-        {
-          method:
-            'PATCH',
+      const response =
+        await $fetch(
+          `/api/teacher/workspace/${studentId.value}`,
+          {
+            method:
+              'POST',
 
-          body: {
-            name,
-          },
-        }
+            body: {
+              action:
+                'ATTENDANCE',
+
+              courseId:
+                payload.courseId,
+
+              classDate:
+                payload.classDate,
+
+              status:
+                payload.status,
+
+              note:
+                payload.note,
+            },
+          }
+        )
+
+      successMessage.value =
+        response.message ||
+        '紀錄已更新'
+
+      await loadWorkspace()
+    } catch (
+      error
+    ) {
+      console.error(
+        '簽到 / 請假失敗：',
+        error
       )
 
-      showEditDialog.value =
-        false
-
-      showToast(
-        '學生資料更新成功'
-      )
-
-      await fetchStudent()
-    } catch (error) {
       errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.message ||
-        '更新失敗'
+        getErrorMessage(
+          error,
+          '紀錄更新失敗'
+        )
     } finally {
-      saving.value =
+      actionSaving.value =
         false
     }
   }
 
 // ============================================================
-// Course Schedules
+// History Change
 // ============================================================
 
-const selectedCourseSchedules =
-  computed(() => {
-    if (
-      !enrollmentForm
-        .courseId
-    ) {
-      return []
-    }
-
-    return availableSchedules.value
-      .filter(
-        (
-          schedule
-        ) => {
-          return (
-            String(
-              schedule.course_id
-            ) ===
-            String(
-              enrollmentForm
-                .courseId
-            )
-          )
-        }
-      )
-  })
-
-// ============================================================
-// Create Enrollment
-//
-// 目前第一次建立仍先指定一個 Primary。
-// 建完之後即可使用下面多 Schedule Editor
-// 加入第二、第三個固定時段。
-// ============================================================
-
-const createEnrollment =
-  async () => {
-    if (
-      enrollmentSaving.value
-    ) {
-      return
-    }
-
-    if (
-      !enrollmentForm
-        .courseId
-    ) {
-      return
-    }
-
-    enrollmentSaving.value =
-      true
-
-    try {
-      await $fetch(
-        `/api/teacher/students/${studentId.value}/enrollments`,
-        {
-          method:
-            'POST',
-
-          body: {
-            courseId:
-              enrollmentForm
-                .courseId,
-
-            scheduleId:
-              enrollmentForm
-                .scheduleId ||
-              null,
-          },
-        }
-      )
-
-      showEnrollmentDialog.value =
-        false
-
-      showToast(
-        '學生已加入課程'
-      )
-
-      await fetchStudent()
-    } catch (error) {
-      errorMessage.value =
-        error?.data
-          ?.statusMessage ||
-        error?.message ||
-        '加入課程失敗'
-    } finally {
-      enrollmentSaving.value =
-        false
-    }
-  }
-
-// ============================================================
-// Schedule Updated
-// ============================================================
-
-const handleSchedulesUpdated =
-  async () => {
-    showToast(
-      '固定班別已更新'
-    )
-
-    await fetchStudent()
-  }
-
-// ============================================================
-// Package for Course
-// ============================================================
-
-const getLatestPackage =
-  (
-    courseId
+const changeHistory =
+  async (
+    payload
   ) => {
-    return (
-      packages.value.find(
-        (
-          item
-        ) => {
-          return (
-            String(
-              item.course_id
-            ) ===
-            String(
-              courseId
-            )
-          )
-        }
-      ) ||
-      null
-    )
+    if (
+      historySavingId.value
+    ) {
+      return
+    }
+
+    historySavingId.value =
+      String(
+        payload.attendanceId
+      )
+
+    errorMessage.value =
+      ''
+
+    successMessage.value =
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          `/api/teacher/workspace/${studentId.value}`,
+          {
+            method:
+              'POST',
+
+            body: {
+              action:
+                'ATTENDANCE',
+
+              courseId:
+                payload.courseId,
+
+              classDate:
+                payload.classDate,
+
+              status:
+                payload.status,
+
+              note:
+                payload.note,
+            },
+          }
+        )
+
+      successMessage.value =
+        response.message ||
+        '歷史紀錄已修改'
+
+      await loadWorkspace()
+    } catch (
+      error
+    ) {
+      console.error(
+        '修改歷史紀錄失敗：',
+        error
+      )
+
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '歷史紀錄修改失敗'
+        )
+    } finally {
+      historySavingId.value =
+        ''
+    }
   }
 
 // ============================================================
-// Mounted
+// New Package
+// ============================================================
+
+const openNewPackage =
+  () => {
+    selectedRenewPackage.value =
+      null
+
+    showPackageDialog.value =
+      true
+  }
+
+// ============================================================
+// Renew Package
+// ============================================================
+
+const openRenewPackage =
+  (
+    packageData
+  ) => {
+    selectedRenewPackage.value =
+      packageData
+
+    showPackageDialog.value =
+      true
+  }
+
+// ============================================================
+// Save Package
+// ============================================================
+
+const savePackage =
+  async (
+    payload
+  ) => {
+    if (
+      packageSaving.value
+    ) {
+      return
+    }
+
+    packageSaving.value =
+      true
+
+    errorMessage.value =
+      ''
+
+    successMessage.value =
+      ''
+
+    try {
+      const response =
+        await $fetch(
+          `/api/teacher/workspace/${studentId.value}`,
+          {
+            method:
+              'POST',
+
+            body:
+              payload,
+          }
+        )
+
+      successMessage.value =
+        response.message ||
+        '方案已更新'
+
+      showPackageDialog.value =
+        false
+
+      selectedRenewPackage.value =
+        null
+
+      await loadWorkspace()
+    } catch (
+      error
+    ) {
+      console.error(
+        '方案操作失敗：',
+        error
+      )
+
+      errorMessage.value =
+        getErrorMessage(
+          error,
+          '方案操作失敗'
+        )
+    } finally {
+      packageSaving.value =
+        false
+    }
+  }
+
+// ============================================================
+// Format
+// ============================================================
+
+const formatDate = (
+  value
+) => {
+  if (
+    !value
+  ) {
+    return '-'
+  }
+
+  return String(
+    value
+  ).slice(
+    0,
+    10
+  )
+}
+
+const formatMoney = (
+  value
+) => {
+  return new Intl
+    .NumberFormat(
+      'zh-TW',
+      {
+        maximumFractionDigits:
+          0,
+      }
+    )
+    .format(
+      Number(
+        value || 0
+      )
+    )
+}
+
+// ============================================================
+// Lifecycle
 // ============================================================
 
 onMounted(
   async () => {
-    await fetchStudent()
-  }
-)
-
-onBeforeUnmount(
-  () => {
-    if (
-      toastTimer
-    ) {
-      window.clearTimeout(
-        toastTimer
-      )
-    }
+    await loadWorkspace()
   }
 )
 </script>
 
 <template>
-  <main
-    class="
-      student-detail-page
-    "
-  >
-    <div
-      class="
-        container
-      "
-    >
+  <main class="student-workspace">
+    <div class="container">
+      <!-- ====================================================
+           Header
+           ==================================================== -->
+
+      <header class="page-header">
+        <div>
+          <NuxtLink
+            to="/teacher"
+            class="back-link"
+          >
+            ← 學生列表
+          </NuxtLink>
+
+          <span>
+            Student
+          </span>
+
+          <h1>
+            {{
+              student?.name ||
+              '學生'
+            }}
+          </h1>
+
+          <p
+            v-if="
+              student
+            "
+          >
+            {{
+              student.user_id
+                ? 'LINE 已綁定'
+                : 'LINE 尚未綁定'
+            }}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="new-package-button"
+          :disabled="
+            !student ||
+            student.status !==
+              'ACTIVE'
+          "
+          @click="
+            openNewPackage
+          "
+        >
+          ＋ 新增課程方案
+        </button>
+      </header>
+
+      <!-- ====================================================
+           Main Navigation
+           ==================================================== -->
+
+      <nav class="main-nav">
+        <NuxtLink
+          to="/teacher"
+        >
+          學生管理
+        </NuxtLink>
+
+        <NuxtLink
+          to="/teacher/courses"
+        >
+          課堂管理
+        </NuxtLink>
+
+        <NuxtLink
+          to="/teacher/audit"
+        >
+          操作紀錄
+        </NuxtLink>
+      </nav>
+
+      <!-- ====================================================
+           Messages
+           ==================================================== -->
+
+      <div
+        v-if="
+          errorMessage
+        "
+        class="error-message"
+      >
+        {{
+          errorMessage
+        }}
+      </div>
+
+      <div
+        v-if="
+          successMessage
+        "
+        class="success-message"
+      >
+        {{
+          successMessage
+        }}
+      </div>
+
+      <!-- ====================================================
+           Loading
+           ==================================================== -->
+
       <div
         v-if="
           loading
         "
-        class="
-          loading-page
-        "
+        class="empty-state"
       >
-        <div
-          class="
-            loader
-          "
-        />
-
-        <span>
-          載入學生資料
-        </span>
+        載入學生資料中...
       </div>
 
       <template
@@ -490,1057 +582,407 @@ onBeforeUnmount(
           student
         "
       >
-        <header
-          class="
-            header
-          "
-        >
-          <div>
-            <NuxtLink
-              to="
-                /teacher/students
-              "
-              class="
-                back-link
-              "
-            >
-              ← 學生列表
-            </NuxtLink>
-
-            <span
-              class="
-                eyebrow
-              "
-            >
-              Student
-            </span>
-
-            <h1>
-              {{
-                studentName
-              }}
-            </h1>
-
-            <p>
-              課程、固定班別、Package 與歷史紀錄
-            </p>
-          </div>
-
-          <button
-            type="button"
-            class="
-              black-button
-            "
-            @click="
-              openEditDialog
-            "
-          >
-            編輯姓名
-          </button>
-        </header>
-
-        <div
-          v-if="
-            errorMessage
-          "
-          class="
-            error-message
-          "
-        >
-          {{
-            errorMessage
-          }}
-        </div>
-
         <!-- ==================================================
-             Overview
+             Packages
              ================================================== -->
 
-        <section
-          class="
-            overview-grid
-          "
-        >
-          <article>
-            <span>
-              課程
-            </span>
-
-            <strong>
-              {{
-                enrollments.length
-              }}
-            </strong>
-          </article>
-
-          <article>
-            <span>
-              Package
-            </span>
-
-            <strong>
-              {{
-                packages.length
-              }}
-            </strong>
-          </article>
-
-          <article>
-            <span>
-              LINE
-            </span>
-
-            <strong
-              class="
-                small-status
-              "
-            >
-              {{
-                isLineLinked
-                  ? '已綁定'
-                  : '未綁定'
-              }}
-            </strong>
-          </article>
-        </section>
-
-        <!-- ==================================================
-             Enrollments
-             ================================================== -->
-
-        <section
-          class="
-            main-panel
-          "
-        >
-          <div
-            class="
-              panel-header
-            "
-          >
+        <section class="section">
+          <header class="section-header">
             <div>
               <span>
-                Enrollment
+                Courses
               </span>
 
               <h2>
-                學生課程與固定班別
+                課程方案
               </h2>
             </div>
-
-            <button
-              type="button"
-              class="
-                black-button
-                small
-              "
-              @click="
-                showEnrollmentDialog =
-                  true
-              "
-            >
-              ＋ 加入課程
-            </button>
-          </div>
+          </header>
 
           <div
             v-if="
-              enrollments.length
+              activePackages.length
             "
-            class="
-              enrollment-list
-            "
+            class="package-list"
           >
-            <article
+            <TeacherStudentPackageCard
               v-for="
-                enrollment in
-                  enrollments
+                packageData in
+                  activePackages
               "
               :key="
-                enrollment.id
+                packageData.id
               "
-              class="
-                enrollment-card
+              :package-data="
+                packageData
               "
-            >
-              <div
-                class="
-                  enrollment-heading
-                "
-              >
-                <div>
-                  <span>
-                    Course
-                  </span>
-
-                  <h3>
-                    {{
-                      enrollment
-                        .course_name
-                    }}
-                  </h3>
-                </div>
-
-                <span
-                  class="
-                    status-pill
-                  "
-                >
-                  {{
-                    enrollment.status
-                  }}
-                </span>
-              </div>
-
-              <!-- ============================================
-                   Current Schedules
-                   ============================================ -->
-
-              <div
-                class="
-                  current-schedules
-                "
-              >
-                <span
-                  class="
-                    subsection-title
-                  "
-                >
-                  目前固定班別
-                </span>
-
-                <div
-                  v-if="
-                    enrollment
-                      .schedules
-                      ?.length
-                  "
-                  class="
-                    schedule-chips
-                  "
-                >
-                  <span
-                    v-for="
-                      schedule in
-                        enrollment
-                          .schedules
-                    "
-                    :key="
-                      schedule.schedule_id
-                    "
-                    class="
-                      schedule-chip
-                    "
-                    :class="{
-                      'schedule-chip--primary':
-                        schedule.is_primary,
-                    }"
-                  >
-                    {{
-                      getWeekdayLabel(
-                        schedule.weekday
-                      )
-                    }}
-
-                    {{
-                      String(
-                        schedule.start_time ||
-                        ''
-                      )
-                        .slice(
-                          0,
-                          5
-                        )
-                    }}
-
-                    <small
-                      v-if="
-                        schedule.is_primary
-                      "
-                    >
-                      主要
-                    </small>
-                  </span>
-                </div>
-
-                <span
-                  v-else
-                  class="
-                    no-schedule
-                  "
-                >
-                  尚未設定固定時段
-                </span>
-              </div>
-
-              <!-- ============================================
-                   Editor
-                   ============================================ -->
-
-              <EnrollmentScheduleEditor
-                :enrollment="
-                  enrollment
-                "
-                :available-schedules="
-                  availableSchedules
-                "
-                :student-id="
-                  studentId
-                "
-                @updated="
-                  handleSchedulesUpdated
-                "
-              />
-
-              <!-- ============================================
-                   Package
-                   ============================================ -->
-
-              <div
-                v-if="
-                  getLatestPackage(
-                    enrollment
-                      .course_id
-                  )
-                "
-                class="
-                  package-summary
-                "
-              >
-                <div>
-                  <span>
-                    Package
-                  </span>
-
-                  <strong>
-                    第
-                    {{
-                      getLatestPackage(
-                        enrollment
-                          .course_id
-                      )
-                        .cycle_no ||
-                      1
-                    }}
-                    期
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    堂數
-                  </span>
-
-                  <strong>
-                    {{
-                      getLatestPackage(
-                        enrollment
-                          .course_id
-                      )
-                        .attended_count ||
-                      0
-                    }}
-                    /
-                    {{
-                      getLatestPackage(
-                        enrollment
-                          .course_id
-                      )
-                        .total_sessions
-                    }}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    價格
-                  </span>
-
-                  <strong>
-                    NT$
-                    {{
-                      formatMoney(
-                        getLatestPackage(
-                          enrollment
-                            .course_id
-                        )
-                          .price
-                      )
-                    }}
-                  </strong>
-                </div>
-              </div>
-            </article>
+              @renew="
+                openRenewPackage
+              "
+            />
           </div>
 
           <div
             v-else
-            class="
-              empty-state
-            "
+            class="empty-state compact"
           >
-            尚未加入任何課程
+            這位學生目前還沒有進行中的課程方案。
+          </div>
+        </section>
+
+        <!-- ==================================================
+             Attendance Form
+             ================================================== -->
+
+        <section class="section">
+          <TeacherStudentAttendanceQuickForm
+            :courses="
+              courses
+            "
+            :packages="
+              packages
+            "
+            :saving="
+              actionSaving
+            "
+            @submit="
+              submitAttendance
+            "
+          />
+        </section>
+
+        <!-- ==================================================
+             Attendance History
+             ================================================== -->
+
+        <section class="section">
+          <TeacherStudentAttendanceHistory
+            :records="
+              attendance
+            "
+            :saving-id="
+              historySavingId
+            "
+            @change="
+              changeHistory
+            "
+          />
+        </section>
+
+        <!-- ==================================================
+             Old Packages
+             ================================================== -->
+
+        <section
+          v-if="
+            completedPackages.length
+          "
+          class="section"
+        >
+          <header class="section-header">
+            <div>
+              <span>
+                Previous Rounds
+              </span>
+
+              <h2>
+                過去方案
+              </h2>
+            </div>
+          </header>
+
+          <div class="history-packages">
+            <article
+              v-for="
+                packageData in
+                  completedPackages
+              "
+              :key="
+                packageData.id
+              "
+            >
+              <div>
+                <strong>
+                  {{
+                    packageData.course_name
+                  }}
+                </strong>
+
+                <span>
+                  第
+                  {{
+                    packageData.cycle_no
+                  }}
+                  輪
+                  ・
+                  {{
+                    packageData.used_sessions
+                  }}
+                  /
+                  {{
+                    packageData.total_sessions
+                  }}
+                  堂
+                </span>
+              </div>
+
+              <div>
+                <strong>
+                  $
+                  {{
+                    formatMoney(
+                      packageData.price
+                    )
+                  }}
+                </strong>
+
+                <span>
+                  開始
+                  {{
+                    formatDate(
+                      packageData.start_date
+                    )
+                  }}
+                </span>
+              </div>
+            </article>
           </div>
         </section>
       </template>
     </div>
 
     <!-- ======================================================
-         Edit Dialog
+         Package Dialog
          ====================================================== -->
 
-    <Teleport
-      to="body"
-    >
-      <div
-        v-if="
-          showEditDialog
-        "
-        class="
-          dialog-mask
-        "
-        @click.self="
-          showEditDialog =
-            false
-        "
-      >
-        <form
-          class="
-            dialog
-          "
-          @submit.prevent="
-            saveStudent
-          "
-        >
-          <h2>
-            修改學生姓名
-          </h2>
-
-          <label>
-            姓名
-          </label>
-
-          <input
-            v-model="
-              editForm.name
-            "
-            type="text"
-            maxlength="100"
-          >
-
-          <div
-            class="
-              dialog-actions
-            "
-          >
-            <button
-              type="button"
-              @click="
-                showEditDialog =
-                  false
-              "
-            >
-              取消
-            </button>
-
-            <button
-              type="submit"
-              class="
-                confirm
-              "
-              :disabled="
-                saving
-              "
-            >
-              {{
-                saving
-                  ? '儲存中...'
-                  : '儲存'
-              }}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <!-- ====================================================
-           Enrollment Dialog
-           ==================================================== -->
-
-      <div
-        v-if="
-          showEnrollmentDialog
-        "
-        class="
-          dialog-mask
-        "
-        @click.self="
-          showEnrollmentDialog =
-            false
-        "
-      >
-        <form
-          class="
-            dialog
-          "
-          @submit.prevent="
-            createEnrollment
-          "
-        >
-          <h2>
-            加入課程
-          </h2>
-
-          <label>
-            課程
-          </label>
-
-          <select
-            v-model="
-              enrollmentForm
-                .courseId
-            "
-            @change="
-              enrollmentForm
-                .scheduleId =
-                  ''
-            "
-          >
-            <option
-              value=""
-            >
-              請選擇
-            </option>
-
-            <option
-              v-for="
-                course in
-                  availableCourses
-              "
-              :key="
-                course.id
-              "
-              :value="
-                course.id
-              "
-            >
-              {{
-                course.name
-              }}
-            </option>
-          </select>
-
-          <label>
-            主要班別
-          </label>
-
-          <select
-            v-model="
-              enrollmentForm
-                .scheduleId
-            "
-            :disabled="
-              !enrollmentForm
-                .courseId
-            "
-          >
-            <option
-              value=""
-            >
-              暫不指定
-            </option>
-
-            <option
-              v-for="
-                schedule in
-                  selectedCourseSchedules
-              "
-              :key="
-                schedule.id
-              "
-              :value="
-                schedule.id
-              "
-            >
-              {{
-                getWeekdayLabel(
-                  schedule.weekday
-                )
-              }}
-
-              {{
-                String(
-                  schedule.start_time ||
-                  ''
-                )
-                  .slice(
-                    0,
-                    5
-                  )
-              }}
-            </option>
-          </select>
-
-          <small
-            class="
-              form-hint
-            "
-          >
-            建立後可以再選擇第二、第三個固定時段。
-          </small>
-
-          <div
-            class="
-              dialog-actions
-            "
-          >
-            <button
-              type="button"
-              @click="
-                showEnrollmentDialog =
-                  false
-              "
-            >
-              取消
-            </button>
-
-            <button
-              type="submit"
-              class="
-                confirm
-              "
-              :disabled="
-                enrollmentSaving ||
-                !enrollmentForm
-                  .courseId
-              "
-            >
-              {{
-                enrollmentSaving
-                  ? '建立中...'
-                  : '加入課程'
-              }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </Teleport>
-
-    <Transition
-      name="
-        toast
+    <TeacherStudentPackageDialog
+      v-model="
+        showPackageDialog
       "
-    >
-      <div
-        v-if="
-          successMessage
-        "
-        class="
-          toast
-        "
-      >
-        {{
-          successMessage
-        }}
-      </div>
-    </Transition>
+      :courses="
+        courses
+      "
+      :package-data="
+        selectedRenewPackage
+      "
+      :saving="
+        packageSaving
+      "
+      @submit="
+        savePackage
+      "
+    />
   </main>
 </template>
 
 <style scoped>
-.student-detail-page {
+.student-workspace {
   min-height: 100vh;
-  padding:
-    27px
-    18px
-    60px;
+  padding: 26px 18px 60px;
   background: #f6f6f6;
   color: #222222;
 }
 
 .container {
   width: 100%;
-  max-width: 1080px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
-.header {
+/* ============================================================
+   Header
+   ============================================================ */
+
+.page-header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 20px;
+  gap: 15px;
 }
 
 .back-link {
   display: block;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   color: #777777;
-  font-size: 11px;
+  font-size: 10px;
   text-decoration: none;
 }
 
-.eyebrow,
-.panel-header span,
-.enrollment-heading span,
-.package-summary span,
-.subsection-title {
+.page-header > div > span {
   color: #999999;
-  font-size: 10px;
-  letter-spacing: 0.8px;
+  font-size: 8px;
+  letter-spacing: 1px;
 }
 
-.header h1 {
+.page-header h1 {
+  margin: 3px 0 0;
+  font-size: 29px;
+}
+
+.page-header p {
   margin: 4px 0 0;
-  font-size: 27px;
-}
-
-.header p {
-  margin: 6px 0 0;
   color: #888888;
-  font-size: 12px;
+  font-size: 8px;
 }
 
-.black-button {
-  min-height: 42px;
-  padding:
-    0
-    15px;
+.new-package-button {
+  min-height: 41px;
+  padding: 0 13px;
   border: 0;
   background: #222222;
-  border-radius: 13px;
+  border-radius: 10px;
   color: #ffffff;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.black-button.small {
-  min-height: 36px;
+  font-size: 9px;
 }
 
 /* ============================================================
-   Overview
+   Nav
    ============================================================ */
 
-.overview-grid {
+.main-nav {
   display: grid;
   grid-template-columns:
     repeat(
       3,
-      minmax(0, 1fr)
+      1fr
     );
-  gap: 13px;
-  margin-top: 22px;
-}
-
-.overview-grid article {
-  display: flex;
-  flex-direction: column;
-  min-height: 104px;
-  padding: 17px;
-  background: #ffffff;
-  border-radius: 19px;
-}
-
-.overview-grid span {
-  color: #999999;
-  font-size: 10px;
-}
-
-.overview-grid strong {
-  margin-top: auto;
-  font-size: 26px;
-}
-
-.small-status {
-  font-size: 17px !important;
-}
-
-/* ============================================================
-   Main Panel
-   ============================================================ */
-
-.main-panel {
-  margin-top: 17px;
-  padding: 21px;
-  background: #ffffff;
-  border-radius: 23px;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.panel-header h2 {
-  margin: 4px 0 0;
-  font-size: 18px;
-}
-
-/* ============================================================
-   Enrollment
-   ============================================================ */
-
-.enrollment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-top: 17px;
-}
-
-.enrollment-card {
-  padding: 17px;
-  border: 1px solid #eeeeee;
-  border-radius: 18px;
-}
-
-.enrollment-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.enrollment-heading h3 {
-  margin: 4px 0 0;
-  font-size: 16px;
-}
-
-.status-pill {
-  padding:
-    5px
-    8px;
-  background: #f3f3f3;
-  border-radius: 999px;
-  font-size: 9px !important;
-}
-
-.current-schedules {
-  margin-top: 14px;
-}
-
-.schedule-chips {
-  display: flex;
-  flex-wrap: wrap;
   gap: 7px;
-  margin-top: 8px;
+  margin-top: 17px;
 }
 
-.schedule-chip {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding:
-    6px
-    9px;
-  background: #f4f4f4;
-  border-radius: 999px;
-  color: #666666;
-  font-size: 10px;
-}
-
-.schedule-chip--primary {
-  background: #222222;
-  color: #ffffff;
-}
-
-.schedule-chip small {
-  opacity: 0.65;
-}
-
-.no-schedule {
-  display: block;
-  margin-top: 7px;
-  color: #aaaaaa;
-  font-size: 10px;
-}
-
-/* ============================================================
-   Package
-   ============================================================ */
-
-.package-summary {
-  display: grid;
-  grid-template-columns:
-    repeat(
-      3,
-      minmax(0, 1fr)
-    );
-  gap: 9px;
-  margin-top: 15px;
-  padding: 13px;
-  background: #f7f7f7;
-  border-radius: 13px;
-}
-
-.package-summary >
-div {
-  display: flex;
-  flex-direction: column;
-}
-
-.package-summary strong {
-  margin-top: 4px;
-  font-size: 11px;
-}
-
-/* ============================================================
-   Dialog
-   ============================================================ */
-
-.dialog-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  background:
-    rgb(0 0 0 / 45%);
-}
-
-.dialog {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 410px;
-  padding: 23px;
+.main-nav a {
+  padding: 10px;
   background: #ffffff;
-  border-radius: 22px;
-}
-
-.dialog h2 {
-  margin: 0 0 18px;
-}
-
-.dialog label {
-  margin:
-    13px
-    0
-    6px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.dialog input,
-.dialog select {
-  height: 44px;
-  padding:
-    0
-    11px;
-  border: 1px solid #dddddd;
-  border-radius: 12px;
-}
-
-.form-hint {
-  margin-top: 7px;
-  color: #999999;
-  font-size: 10px;
-}
-
-.dialog-actions {
-  display: grid;
-  grid-template-columns:
-    1fr 1fr;
-  gap: 9px;
-  margin-top: 22px;
-}
-
-.dialog-actions button {
-  min-height: 43px;
-  border: 0;
-  background: #eeeeee;
-  border-radius: 12px;
-}
-
-.dialog-actions .confirm {
-  background: #222222;
-  color: #ffffff;
+  border-radius: 9px;
+  color: #777777;
+  font-size: 8px;
+  text-align: center;
+  text-decoration: none;
 }
 
 /* ============================================================
-   Utility
+   Message
    ============================================================ */
+
+.error-message,
+.success-message {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 9px;
+  font-size: 9px;
+}
 
 .error-message {
-  margin-top: 13px;
-  padding: 11px;
   background: #fff0f0;
-  border-radius: 11px;
   color: #c94343;
-  font-size: 11px;
 }
 
+.success-message {
+  background: #eaf7ec;
+  color: #418b4b;
+}
+
+/* ============================================================
+   Sections
+   ============================================================ */
+
+.section {
+  margin-top: 18px;
+}
+
+.section-header span {
+  color: #999999;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.section-header h2 {
+  margin: 3px 0 8px;
+  font-size: 17px;
+}
+
+/* ============================================================
+   Packages
+   ============================================================ */
+
+.package-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ============================================================
+   Old Packages
+   ============================================================ */
+
+.history-packages {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-packages article {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px;
+  background: #ffffff;
+  border-radius: 11px;
+}
+
+.history-packages article > div:last-child {
+  text-align: right;
+}
+
+.history-packages strong {
+  display: block;
+  font-size: 9px;
+}
+
+.history-packages span {
+  display: block;
+  margin-top: 3px;
+  color: #999999;
+  font-size: 7px;
+}
+
+/* ============================================================
+   Empty
+   ============================================================ */
+
 .empty-state {
+  margin-top: 12px;
   padding: 30px;
+  background: #ffffff;
+  border-radius: 14px;
   color: #aaaaaa;
+  font-size: 9px;
   text-align: center;
 }
 
-.loading-page {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 60vh;
+.empty-state.compact {
+  margin-top: 0;
+  padding: 20px;
 }
 
-.loader {
-  width: 39px;
-  height: 39px;
-  margin-bottom: 13px;
-  border: 4px solid #eeeeee;
-  border-top-color: #222222;
-  border-radius: 50%;
-  animation:
-    loading
-    0.75s
-    linear infinite;
-}
-
-.toast {
-  position: fixed;
-  bottom: 27px;
-  left: 50%;
-  z-index: 1100;
-  padding:
-    10px
-    18px;
-  background: #222222;
-  border-radius: 999px;
-  color: #ffffff;
-  font-size: 11px;
-  transform:
-    translateX(-50%);
-}
-
-@keyframes loading {
-  to {
-    transform:
-      rotate(360deg);
-  }
+button:disabled {
+  opacity: 0.4;
 }
 
 @media (
-  max-width: 650px
+  max-width: 520px
 ) {
-  .overview-grid {
-    grid-template-columns:
-      repeat(
-        3,
-        1fr
-      );
+  .student-workspace {
+    padding: 18px 12px 45px;
   }
 
-  .package-summary {
-    grid-template-columns:
-      1fr;
+  .page-header {
+    align-items: flex-start;
   }
 
-  .header >
-  .black-button {
-    display: none;
+  .new-package-button {
+    padding: 0 10px;
+    font-size: 8px;
   }
 }
 </style>

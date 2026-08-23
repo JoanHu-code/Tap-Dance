@@ -1,54 +1,72 @@
 <script setup>
+// ============================================================
+// Props
+// ============================================================
+
 const props =
   defineProps({
-    makeup: {
+    record: {
       type: Object,
       required: true,
+    },
+
+    saving: {
+      type: Boolean,
+      default: false,
     },
 
     showStudent: {
       type: Boolean,
       default: false,
     },
-
-    editable: {
-      type: Boolean,
-      default: true,
-    },
-
-    loading: {
-      type: Boolean,
-      default: false,
-    },
   })
+
+// ============================================================
+// Emits
+// ============================================================
 
 const emit =
   defineEmits([
-    'edit-note',
-    'cancel',
-    'restore',
+    'action',
   ])
 
 // ============================================================
-// Date
+// Note
+// ============================================================
+
+const note =
+  ref(
+    props.record.note ||
+    ''
+  )
+
+// ============================================================
+// Cancellation Reason
+// ============================================================
+
+const cancellationReason =
+  ref('')
+
+// ============================================================
+// Format
 // ============================================================
 
 const formatDate = (
   value
 ) => {
-  return value
-    ? String(
-        value
-      ).slice(
-        0,
-        10
-      )
-    : '-'
-}
+  if (
+    !value
+  ) {
+    return '-'
+  }
 
-// ============================================================
-// Time
-// ============================================================
+  return String(
+    value
+  ).slice(
+    0,
+    10
+  )
+}
 
 const formatTime = (
   value
@@ -62,691 +80,837 @@ const formatTime = (
 }
 
 // ============================================================
-// DateTime
+// Package
 // ============================================================
 
-const formatDateTime = (
-  value
-) => {
-  if (!value) {
-    return '-'
-  }
-
-  const date =
-    new Date(
-      value
+const usedSessions =
+  computed(() => {
+    return Number(
+      props.record
+        .used_sessions ||
+      0
     )
+  })
 
-  if (
-    Number.isNaN(
-      date.getTime()
+const totalSessions =
+  computed(() => {
+    return Number(
+      props.record
+        .total_sessions ||
+      0
     )
-  ) {
-    return String(
-      value
+  })
+
+const remainingSessions =
+  computed(() => {
+    return Math.max(
+      totalSessions.value -
+      usedSessions.value,
+      0
     )
-  }
+  })
 
-  return new Intl
-    .DateTimeFormat(
-      'zh-TW',
-      {
-        timeZone:
-          'Asia/Taipei',
+const progress =
+  computed(() => {
+    if (
+      totalSessions.value <=
+      0
+    ) {
+      return 0
+    }
 
-        year:
-          'numeric',
-
-        month:
-          '2-digit',
-
-        day:
-          '2-digit',
-
-        hour:
-          '2-digit',
-
-        minute:
-          '2-digit',
-
-        hourCycle:
-          'h23',
-      }
+    return Math.min(
+      Math.round(
+        usedSessions.value /
+        totalSessions.value *
+        100
+      ),
+      100
     )
-    .format(
-      date
-    )
-}
+  })
 
 // ============================================================
-// Status
+// State
 // ============================================================
+
+const isActive =
+  computed(() => {
+    return (
+      props.record.status ===
+      'ACTIVE'
+    )
+  })
 
 const isCancelled =
   computed(() => {
     return (
-      props.makeup
-        ?.status ===
+      props.record.status ===
       'CANCELLED'
     )
   })
 
-const getAttendanceLabel = (
-  value
-) => {
-  const map = {
-    ATTENDED:
-      '已上課',
-
-    LEAVE:
-      '請假',
-
-    ABSENT:
-      '缺席',
-
-    CANCELLED:
-      '已取消',
-  }
-
-  return (
-    map[value] ||
-    value ||
-    '-'
-  )
-}
-
 // ============================================================
-// Creator
+// Data Conflict
 // ============================================================
 
-const creatorLabel =
+const hasAttendanceConflict =
   computed(() => {
-    const role =
-      props.makeup
-        ?.created_by_role
-
     if (
-      role ===
-      'TEACHER'
+      isActive.value
     ) {
-      return '老師'
+      return !(
+        props.record
+          .makeup_attendance_status ===
+          'ATTENDED' &&
+        props.record
+          .makeup_attendance_type ===
+          'MAKEUP'
+      )
     }
 
     if (
-      role ===
-      'STUDENT'
+      isCancelled.value
     ) {
-      return '學生'
+      return !(
+        props.record
+          .makeup_attendance_status ===
+          'CANCELLED' &&
+        props.record
+          .makeup_attendance_type ===
+          'MAKEUP'
+      )
     }
 
+    return false
+  })
+
+// ============================================================
+// Note Dirty
+// ============================================================
+
+const noteDirty =
+  computed(() => {
     return (
-      role ||
-      '-'
+      note.value.trim() !==
+      String(
+        props.record.note ||
+        ''
+      ).trim()
     )
   })
 
 // ============================================================
-// Actions
+// Update Note
 // ============================================================
 
-const editNote =
+const updateNote =
   () => {
     if (
-      props.loading
+      props.saving ||
+      !noteDirty.value
     ) {
       return
     }
 
     emit(
-      'edit-note',
-      props.makeup
+      'action',
+      {
+        makeupId:
+          props.record.id,
+
+        action:
+          'UPDATE_NOTE',
+
+        note:
+          note.value.trim() ||
+          null,
+      }
     )
   }
 
-const cancelMakeup =
+// ============================================================
+// Cancel
+// ============================================================
+
+const cancel =
   () => {
     if (
-      props.loading ||
-      isCancelled.value
+      props.saving ||
+      !isActive.value
+    ) {
+      return
+    }
+
+    if (
+      !window.confirm(
+        '確定要取消這筆補課嗎？取消後會扣回這一堂實際出席。'
+      )
     ) {
       return
     }
 
     emit(
-      'cancel',
-      props.makeup
+      'action',
+      {
+        makeupId:
+          props.record.id,
+
+        action:
+          'CANCEL',
+
+        reason:
+          cancellationReason.value
+            .trim() ||
+          null,
+      }
     )
   }
 
-const restoreMakeup =
+// ============================================================
+// Restore
+// ============================================================
+
+const restore =
   () => {
     if (
-      props.loading ||
+      props.saving ||
       !isCancelled.value
     ) {
       return
     }
 
+    if (
+      !window.confirm(
+        '確定要恢復這筆補課嗎？恢復後會重新累加 1 堂實際出席。'
+      )
+    ) {
+      return
+    }
+
     emit(
-      'restore',
-      props.makeup
+      'action',
+      {
+        makeupId:
+          props.record.id,
+
+        action:
+          'RESTORE',
+      }
     )
   }
+
+// ============================================================
+// Watch
+// ============================================================
+
+watch(
+  () =>
+    props.record,
+  (
+    value
+  ) => {
+    note.value =
+      value.note ||
+      ''
+
+    cancellationReason.value =
+      value.cancellation_reason ||
+      ''
+  },
+  {
+    deep: true,
+  }
+)
 </script>
 
 <template>
   <article
     class="makeup-card"
     :class="{
-      'makeup-card--cancelled':
+      cancelled:
         isCancelled,
+
+      conflict:
+        hasAttendanceConflict,
     }"
   >
     <!-- ======================================================
          Header
          ====================================================== -->
 
-    <header class="card-header">
+    <header>
       <div>
-        <span class="eyebrow">
-          Makeup
+        <span
+          v-if="
+            showStudent
+          "
+          class="student-name"
+        >
+          {{
+            record.student_name
+          }}
         </span>
+
+        <small>
+          Makeup
+        </small>
 
         <h3>
           {{
-            makeup.course_name
+            record.course_name
           }}
         </h3>
-
-        <p
-          v-if="
-            showStudent &&
-            makeup.student_name
-          "
-        >
-          {{
-            makeup.student_name
-          }}
-        </p>
-
-        <span class="cycle">
-          第
-          {{
-            makeup.package_cycle_no ||
-            '-'
-          }}
-          期
-        </span>
       </div>
 
       <span
-        class="status-badge"
+        class="status"
         :class="{
-          'status-badge--cancelled':
+          active:
+            isActive,
+
+          cancelled:
             isCancelled,
         }"
       >
         {{
-          isCancelled
-            ? '已取消'
-            : '有效'
+          isActive
+            ? '進行中'
+            : '已取消'
         }}
       </span>
     </header>
 
     <!-- ======================================================
-         Source → Makeup
+         Dates
          ====================================================== -->
 
-    <div class="makeup-route">
-      <div class="route-item">
-        <span class="route-label">
-          原請假
+    <section class="date-flow">
+      <div>
+        <span>
+          原本請假
         </span>
 
         <strong>
           {{
             formatDate(
-              makeup.source_class_date
+              record.source_class_date
             )
           }}
         </strong>
 
-        <p>
+        <small>
           {{
             formatTime(
-              makeup.source_start_time
+              record.source_start_time
             )
           }}
-
-          <template
-            v-if="
-              makeup.source_schedule_name
-            "
-          >
-            ・
-            {{
-              makeup.source_schedule_name
-            }}
-          </template>
-        </p>
+        </small>
       </div>
 
-      <div class="route-arrow">
-        ↓
+      <div class="arrow">
+        →
       </div>
 
-      <div
-        class="
-          route-item
-          route-item--makeup
-        "
-      >
-        <span class="route-label">
+      <div>
+        <span>
           補課
         </span>
 
         <strong>
           {{
             formatDate(
-              makeup.makeup_class_date
+              record.makeup_class_date
             )
           }}
         </strong>
 
-        <p>
+        <small>
           {{
             formatTime(
-              makeup.makeup_start_time
+              record.makeup_start_time
             )
           }}
-
-          <template
-            v-if="
-              makeup.makeup_end_time
-            "
-          >
-            -
-            {{
-              formatTime(
-                makeup.makeup_end_time
-              )
-            }}
-          </template>
-
-          <template
-            v-if="
-              makeup.makeup_schedule_name
-            "
-          >
-            ・
-            {{
-              makeup.makeup_schedule_name
-            }}
-          </template>
-        </p>
+          –
+          {{
+            formatTime(
+              record.makeup_end_time
+            )
+          }}
+        </small>
       </div>
-    </div>
+    </section>
+
+    <!-- ======================================================
+         Package
+         ====================================================== -->
+
+    <section class="package">
+      <div class="package-title">
+        <span>
+          方案堂數
+        </span>
+
+        <strong>
+          {{
+            usedSessions
+          }}
+          /
+          {{
+            totalSessions
+          }}
+
+          <small>
+            剩
+            {{
+              remainingSessions
+            }}
+            堂
+          </small>
+        </strong>
+      </div>
+
+      <div class="progress-track">
+        <div
+          class="progress-value"
+          :style="{
+            width:
+              `${progress}%`,
+          }"
+        />
+      </div>
+    </section>
 
     <!-- ======================================================
          Attendance
          ====================================================== -->
 
-    <div class="attendance-row">
-      <span>
-        補課 Attendance
-      </span>
+    <section class="attendance-state">
+      <div>
+        <span>
+          補課 Attendance
+        </span>
 
+        <strong>
+          {{
+            record.makeup_attendance_status ||
+            '不存在'
+          }}
+        </strong>
+      </div>
+
+      <div>
+        <span>
+          類型
+        </span>
+
+        <strong>
+          {{
+            record.makeup_attendance_type ||
+            '-'
+          }}
+        </strong>
+      </div>
+    </section>
+
+    <!-- ======================================================
+         Conflict
+         ====================================================== -->
+
+    <div
+      v-if="
+        hasAttendanceConflict
+      "
+      class="conflict-message"
+    >
       <strong>
-        {{
-          getAttendanceLabel(
-            makeup.makeup_attendance_status
-          )
-        }}
+        資料需要檢查
       </strong>
+
+      <p>
+        補課狀態與對應 Attendance 已不一致。系統會阻止取消或恢復直接覆蓋資料，請由老師確認 Audit Log。
+      </p>
     </div>
 
     <!-- ======================================================
          Note
          ====================================================== -->
 
-    <div class="note">
-      <div class="note-header">
+    <label class="note-field">
+      <span>
+        補課備註
+      </span>
+
+      <input
+        v-model="
+          note
+        "
+        type="text"
+        maxlength="2000"
+        placeholder="補課備註..."
+        :disabled="
+          saving
+        "
+      >
+    </label>
+
+    <button
+      type="button"
+      class="save-note"
+      :disabled="
+        saving ||
+        !noteDirty
+      "
+      @click="
+        updateNote
+      "
+    >
+      儲存備註
+    </button>
+
+    <!-- ======================================================
+         Cancel
+         ====================================================== -->
+
+    <template
+      v-if="
+        isActive
+      "
+    >
+      <label class="cancel-reason">
         <span>
-          備註
+          取消原因（選填）
         </span>
 
-        <button
-          v-if="
-            editable
+        <input
+          v-model="
+            cancellationReason
           "
-          type="button"
+          type="text"
+          maxlength="2000"
+          placeholder="例如：補課日期臨時有事"
           :disabled="
-            loading
-          "
-          @click="
-            editNote
+            saving
           "
         >
-          修改
-        </button>
-      </div>
+      </label>
 
-      <p
-        v-if="
-          makeup.note
+      <button
+        type="button"
+        class="cancel-button"
+        :disabled="
+          saving ||
+          hasAttendanceConflict
+        "
+        @click="
+          cancel
         "
       >
         {{
-          makeup.note
+          saving
+            ? '處理中...'
+            : '取消這次補課'
         }}
-      </p>
+      </button>
+    </template>
 
-      <p
-        v-else
-        class="empty-note"
-      >
-        未填寫備註
-      </p>
-    </div>
+    <!-- ======================================================
+         Restore
+         ====================================================== -->
+
+    <button
+      v-else-if="
+        isCancelled
+      "
+      type="button"
+      class="restore-button"
+      :disabled="
+        saving ||
+        hasAttendanceConflict
+      "
+      @click="
+        restore
+      "
+    >
+      {{
+        saving
+          ? '處理中...'
+          : '恢復這次補課'
+      }}
+    </button>
 
     <!-- ======================================================
          Footer
          ====================================================== -->
 
-    <footer class="card-footer">
-      <div>
-        <span
-          v-if="
-            makeup.created_by_role
-          "
-        >
-          建立：
-          {{
-            creatorLabel
-          }}
-        </span>
-
-        <span>
-          {{
-            formatDateTime(
-              makeup.created_at
-            )
-          }}
-        </span>
-      </div>
+    <footer>
+      <span>
+        {{
+          isActive
+            ? '目前這堂補課有計入方案'
+            : '目前這堂補課沒有計入方案'
+        }}
+      </span>
 
       <span
         v-if="
-          isCancelled &&
-          makeup.cancelled_at
+          record.cancellation_reason
         "
       >
-        取消：
+        取消原因：
         {{
-          formatDateTime(
-            makeup.cancelled_at
-          )
+          record.cancellation_reason
         }}
       </span>
     </footer>
-
-    <!-- ======================================================
-         Actions
-         ====================================================== -->
-
-    <div
-      v-if="
-        editable
-      "
-      class="card-actions"
-    >
-      <button
-        v-if="
-          !isCancelled
-        "
-        type="button"
-        class="cancel-button"
-        :disabled="
-          loading
-        "
-        @click="
-          cancelMakeup
-        "
-      >
-        {{
-          loading
-            ? '處理中...'
-            : '取消補課'
-        }}
-      </button>
-
-      <button
-        v-else
-        type="button"
-        class="restore-button"
-        :disabled="
-          loading
-        "
-        @click="
-          restoreMakeup
-        "
-      >
-        {{
-          loading
-            ? '處理中...'
-            : '恢復補課'
-        }}
-      </button>
-    </div>
   </article>
 </template>
 
 <style scoped>
 .makeup-card {
-  padding: 17px;
+  padding: 15px;
   background: #ffffff;
-  border: 1px solid #eeeeee;
-  border-radius: 18px;
+  border: 1px solid transparent;
+  border-radius: 16px;
 }
 
-.makeup-card--cancelled {
-  background: #fafafa;
+.makeup-card.cancelled {
+  opacity: 0.78;
 }
 
-/* ============================================================
-   Header
-   ============================================================ */
+.makeup-card.conflict {
+  border-color: #e4b1b1;
+}
 
-.card-header {
+.makeup-card > header {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
+  gap: 12px;
 }
 
-.eyebrow {
-  color: #aaaaaa;
-  font-size: 9px;
+.student-name {
+  display: block;
+  margin-bottom: 4px;
+  color: #555555;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.makeup-card header small {
+  color: #999999;
+  font-size: 7px;
   letter-spacing: 1px;
 }
 
-.card-header h3 {
-  margin: 4px 0 0;
-  font-size: 16px;
+.makeup-card h3 {
+  margin: 3px 0 0;
+  font-size: 15px;
 }
 
-.card-header p {
-  margin: 4px 0 0;
-  color: #777777;
-  font-size: 10px;
-}
-
-.cycle {
-  display: inline-block;
-  margin-top: 6px;
-  color: #999999;
-  font-size: 9px;
-}
-
-.status-badge {
+.status {
+  height: fit-content;
   padding: 5px 8px;
-  background: #eef8ee;
+  background: #eeeeee;
   border-radius: 999px;
-  color: #4b8e50;
-  font-size: 9px;
-}
-
-.status-badge--cancelled {
-  background: #fff0f0;
-  color: #c94343;
-}
-
-/* ============================================================
-   Route
-   ============================================================ */
-
-.makeup-route {
-  margin-top: 15px;
-  padding: 13px;
-  background: #f7f7f7;
-  border-radius: 13px;
-}
-
-.route-item {
-  display: flex;
-  flex-direction: column;
-}
-
-.route-label {
-  color: #999999;
   font-size: 8px;
 }
 
-.route-item strong {
-  margin-top: 3px;
-  font-size: 12px;
+.status.active {
+  background: #eaf7ec;
+  color: #418b4b;
 }
 
-.route-item p {
-  margin: 4px 0 0;
-  color: #777777;
-  font-size: 9px;
+.status.cancelled {
+  background: #eeeeee;
+  color: #888888;
 }
 
-.route-item--makeup {
+/* ============================================================
+   Dates
+   ============================================================ */
+
+.date-flow {
+  display: grid;
+  grid-template-columns:
+    1fr
+    auto
+    1fr;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.date-flow > div:not(.arrow) {
   padding: 10px;
-  background: #ffffff;
+  background: #f7f7f7;
   border-radius: 10px;
 }
 
-.route-arrow {
-  padding: 7px 0;
+.date-flow span {
+  display: block;
+  color: #999999;
+  font-size: 7px;
+}
+
+.date-flow strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.date-flow small {
+  display: block;
+  margin-top: 3px;
+  color: #888888;
+  font-size: 7px;
+}
+
+.arrow {
   color: #aaaaaa;
-  text-align: center;
+}
+
+/* ============================================================
+   Package
+   ============================================================ */
+
+.package {
+  margin-top: 10px;
+  padding: 11px;
+  background: #222222;
+  border-radius: 11px;
+  color: #ffffff;
+}
+
+.package-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.package-title span {
+  color: rgb(255 255 255 / 55%);
+  font-size: 8px;
+}
+
+.package-title strong {
+  font-size: 10px;
+}
+
+.package-title small {
+  margin-left: 6px;
+  color: rgb(255 255 255 / 55%);
+  font-size: 7px;
+}
+
+.progress-track {
+  height: 5px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 18%);
+  border-radius: 999px;
+}
+
+.progress-value {
+  height: 100%;
+  background: #ffffff;
+  border-radius: 999px;
 }
 
 /* ============================================================
    Attendance
    ============================================================ */
 
-.attendance-row {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 12px;
-  padding: 10px;
-  background: #f7f7f7;
-  border-radius: 10px;
+.attendance-state {
+  display: grid;
+  grid-template-columns:
+    1fr
+    1fr;
+  gap: 6px;
+  margin-top: 9px;
 }
 
-.attendance-row span {
-  color: #888888;
+.attendance-state > div {
+  padding: 9px;
+  background: #f7f7f7;
+  border-radius: 9px;
+}
+
+.attendance-state span {
+  display: block;
+  color: #999999;
+  font-size: 7px;
+}
+
+.attendance-state strong {
+  display: block;
+  margin-top: 3px;
   font-size: 9px;
 }
 
-.attendance-row strong {
-  font-size: 10px;
-}
-
 /* ============================================================
-   Note
+   Conflict
    ============================================================ */
 
-.note {
-  margin-top: 11px;
+.conflict-message {
+  margin-top: 9px;
   padding: 10px;
-  background: #f7f7f7;
-  border-radius: 10px;
+  background: #fff0f0;
+  border-radius: 9px;
 }
 
-.note-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.conflict-message strong {
+  color: #c94343;
+  font-size: 9px;
 }
 
-.note-header span {
-  color: #999999;
+.conflict-message p {
+  margin: 4px 0 0;
+  color: #9b5c5c;
   font-size: 8px;
-}
-
-.note-header button {
-  min-height: 25px;
-  padding: 0 8px;
-  border: 0;
-  background: #ffffff;
-  border-radius: 7px;
-  font-size: 8px;
-}
-
-.note p {
-  margin: 5px 0 0;
-  color: #666666;
-  font-size: 10px;
   line-height: 1.6;
 }
 
-.note .empty-note {
-  color: #aaaaaa;
-}
-
 /* ============================================================
-   Footer
+   Inputs
    ============================================================ */
 
-.card-footer {
+.note-field,
+.cancel-reason {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid #eeeeee;
-  color: #aaaaaa;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.note-field span,
+.cancel-reason span {
+  color: #888888;
+  font-size: 7px;
+}
+
+.note-field input,
+.cancel-reason input {
+  min-height: 35px;
+  padding: 0 9px;
+  border: 1px solid #dddddd;
+  background: #ffffff;
+  border-radius: 8px;
   font-size: 8px;
 }
 
-.card-footer > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-/* ============================================================
-   Actions
-   ============================================================ */
-
-.card-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 11px;
-}
-
-.card-actions button {
-  min-height: 34px;
-  padding: 0 11px;
+.save-note,
+.cancel-button,
+.restore-button {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 7px;
   border: 0;
-  border-radius: 9px;
-  font-size: 9px;
+  border-radius: 8px;
+  font-size: 8px;
+}
+
+.save-note {
+  background: #eeeeee;
+  color: #555555;
 }
 
 .cancel-button {
@@ -755,11 +919,26 @@ const restoreMakeup =
 }
 
 .restore-button {
-  background: #222222;
-  color: #ffffff;
+  background: #eaf7ec;
+  color: #418b4b;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+
+.makeup-card > footer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #eeeeee;
+  color: #aaaaaa;
+  font-size: 7px;
 }
 </style>

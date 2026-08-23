@@ -1,18 +1,10 @@
 import {
-  requireAuth,
-} from '../../../utils/authSession.js'
-
-import {
-  useDatabase,
-} from '../../../utils/db.js'
+  requireStudentContext,
+} from '../../../utils/authContext.js'
 
 import {
   createMakeup,
 } from '../../../services/makeupService.js'
-
-import {
-  getAuditRequestMetadata,
-} from '../../../services/auditService.js'
 
 export default defineEventHandler(
   async (
@@ -22,85 +14,19 @@ export default defineEventHandler(
     // Student Auth
     // ========================================================
 
-    const user =
-      await requireAuth(
+    const context =
+      await requireStudentContext(
         event
       )
 
-    if (
-      user.role !==
-      'STUDENT'
-    ) {
-      throw createError({
-        statusCode: 403,
-
-        statusMessage:
-          '只有學生可以使用學生端補課功能',
-      })
-    }
-
-    const sql =
-      useDatabase()
-
-    // ========================================================
-    // Login User → Student
-    //
-    // 前端不接受 studentId。
-    // ========================================================
-
-    const students =
-      await sql`
-        SELECT
-          id,
-          name,
-          status
-
-        FROM
-          students
-
-        WHERE
-          user_id =
-            ${user.id}
-
-        LIMIT 1
-      `
-
-    if (
-      !students.length
-    ) {
-      throw createError({
-        statusCode: 409,
-
-        statusMessage:
-          '此 LINE 帳號尚未綁定學生資料',
-      })
-    }
+    const user =
+      context.user
 
     const student =
-      students[0]
-
-    if (
-      student.status !==
-      'ACTIVE'
-    ) {
-      throw createError({
-        statusCode: 403,
-
-        statusMessage:
-          '學生資料目前未啟用',
-      })
-    }
+      context.student
 
     // ========================================================
     // Body
-    //
-    // {
-    //   sourceLeaveAttendanceId,
-    //   makeupSessionId,
-    //   note
-    // }
-    //
-    // 沒有 studentId。
     // ========================================================
 
     const body =
@@ -110,17 +36,28 @@ export default defineEventHandler(
 
     const sourceLeaveAttendanceId =
       String(
-        body?.sourceLeaveAttendanceId ||
+        body
+          ?.sourceLeaveAttendanceId ||
         ''
-      )
-        .trim()
+      ).trim()
+
+    const makeupDate =
+      body?.makeupDate
+        ? String(
+            body.makeupDate
+          ).trim()
+        : null
 
     const makeupSessionId =
-      String(
-        body?.makeupSessionId ||
-        ''
-      )
-        .trim()
+      body?.makeupSessionId
+        ? String(
+            body.makeupSessionId
+          ).trim()
+        : null
+
+    // ========================================================
+    // Validate
+    // ========================================================
 
     if (
       !sourceLeaveAttendanceId
@@ -129,32 +66,24 @@ export default defineEventHandler(
         statusCode: 400,
 
         statusMessage:
-          '請選擇要補的請假紀錄',
+          '請選擇要補課的請假紀錄',
       })
     }
 
     if (
+      !makeupDate &&
       !makeupSessionId
     ) {
       throw createError({
         statusCode: 400,
 
         statusMessage:
-          '請選擇補課 Session',
+          '請選擇補課日期',
       })
     }
 
     // ========================================================
-    // Audit Metadata
-    // ========================================================
-
-    const auditMetadata =
-      getAuditRequestMetadata(
-        event
-      )
-
-    // ========================================================
-    // Create
+    // Create Makeup
     // ========================================================
 
     const result =
@@ -163,6 +92,8 @@ export default defineEventHandler(
           student.id,
 
         sourceLeaveAttendanceId,
+
+        makeupDate,
 
         makeupSessionId,
 
@@ -175,14 +106,18 @@ export default defineEventHandler(
         actorRole:
           'STUDENT',
 
-        auditMetadata,
+        event,
       })
+
+    // ========================================================
+    // Response
+    // ========================================================
 
     return {
       success: true,
 
       message:
-        '補課安排成功',
+        '補課紀錄已建立，已累加 1 堂實際出席',
 
       makeup:
         result.makeup,
@@ -192,6 +127,9 @@ export default defineEventHandler(
 
       package:
         result.package,
+
+      targetSession:
+        result.targetSession,
     }
   }
 )
