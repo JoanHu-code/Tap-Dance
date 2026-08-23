@@ -6,30 +6,42 @@ import {
   useDatabase,
 } from '../utils/db.js'
 
+import {
+  createAuditQuery,
+} from './auditService.js'
+
 // ============================================================
-// UUID
+// Constants
 // ============================================================
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-const assertUuid = (
+const COURSE_STATUSES = [
+  'ACTIVE',
+  'INACTIVE',
+]
+
+// ============================================================
+// UUID
+// ============================================================
+
+const normalizeUuid = (
   value,
-  fieldName
+  fieldName,
 ) => {
   const normalized =
     String(
-      value || ''
+      value || '',
     ).trim()
 
   if (
     !UUID_PATTERN.test(
-      normalized
+      normalized,
     )
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
         `${fieldName} 格式不正確`,
     })
@@ -43,16 +55,16 @@ const assertUuid = (
 // ============================================================
 
 const normalizeName = (
-  value
+  value,
 ) => {
   const normalized =
     String(
-      value || ''
+      value || '',
     )
       .trim()
       .slice(
         0,
-        100
+        100,
       )
 
   if (
@@ -60,7 +72,6 @@ const normalizeName = (
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
         '請輸入課堂名稱',
     })
@@ -70,65 +81,31 @@ const normalizeName = (
 }
 
 // ============================================================
-// Description
-// ============================================================
-
-const normalizeDescription = (
-  value
-) => {
-  if (
-    value === undefined ||
-    value === null
-  ) {
-    return null
-  }
-
-  const normalized =
-    String(
-      value
-    )
-      .trim()
-      .slice(
-        0,
-        2000
-      )
-
-  return (
-    normalized ||
-    null
-  )
-}
-
-// ============================================================
 // Weekday
-//
-// 1 = 星期一
-// 7 = 星期日
 // ============================================================
 
 const normalizeWeekday = (
-  value
+  value,
 ) => {
   const parsed =
     Number.parseInt(
       String(
-        value
+        value,
       ),
-      10
+      10,
     )
 
   if (
     !Number.isInteger(
-      parsed
+      parsed,
     ) ||
     parsed < 1 ||
     parsed > 7
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
-        '請選擇正確的星期',
+        '星期必須介於 1 到 7',
     })
   }
 
@@ -141,23 +118,22 @@ const normalizeWeekday = (
 
 const normalizeTime = (
   value,
-  fieldName
+  fieldName,
 ) => {
   const normalized =
     String(
-      value || ''
+      value || '',
     ).trim()
 
   if (
     !/^([01]\d|2[0-3]):[0-5]\d$/.test(
-      normalized
+      normalized,
     )
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
-        `${fieldName} 格式不正確`,
+        `${fieldName}格式必須為 HH:mm`,
     })
   }
 
@@ -165,30 +141,29 @@ const normalizeTime = (
 }
 
 // ============================================================
-// Sessions Per Cycle
+// Sessions
 // ============================================================
 
 const normalizeSessionsPerCycle = (
-  value
+  value,
 ) => {
   const parsed =
     Number.parseInt(
       String(
-        value
+        value,
       ),
-      10
+      10,
     )
 
   if (
     !Number.isInteger(
-      parsed
+      parsed,
     ) ||
     parsed <= 0 ||
-    parsed > 1000
+    parsed > 999
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
         '一期堂數必須是大於 0 的整數',
     })
@@ -198,28 +173,27 @@ const normalizeSessionsPerCycle = (
 }
 
 // ============================================================
-// Price Per Cycle
+// Price
 // ============================================================
 
 const normalizePricePerCycle = (
-  value
+  value,
 ) => {
   const parsed =
     Number(
-      value
+      value,
     )
 
   if (
     !Number.isFinite(
-      parsed
+      parsed,
     ) ||
     parsed < 0
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
-        '一期價格必須大於或等於 0',
+        '一期價格不能小於 0',
     })
   }
 
@@ -231,26 +205,22 @@ const normalizePricePerCycle = (
 // ============================================================
 
 const normalizeStatus = (
-  value
+  value,
 ) => {
   const normalized =
     String(
-      value || ''
+      value || '',
     )
       .trim()
       .toUpperCase()
 
   if (
-    ![
-      'ACTIVE',
-      'INACTIVE',
-    ].includes(
-      normalized
+    !COURSE_STATUSES.includes(
+      normalized,
     )
   ) {
     throw createError({
       statusCode: 400,
-
       statusMessage:
         '課堂狀態不正確',
     })
@@ -260,164 +230,25 @@ const normalizeStatus = (
 }
 
 // ============================================================
-// Validate Time
+// Require Course
 // ============================================================
 
-const validateTimeRange = (
-  startTime,
-  endTime
-) => {
-  if (
-    startTime >=
-    endTime
-  ) {
-    throw createError({
-      statusCode: 400,
-
-      statusMessage:
-        '結束時間必須晚於開始時間',
-    })
-  }
-}
-
-// ============================================================
-// Get Courses
-// ============================================================
-
-export const getCourses =
-  async ({
-    status = null,
-  } = {}) => {
-    const sql =
-      useDatabase()
-
-    let normalizedStatus =
-      null
-
-    if (
-      status
-    ) {
-      normalizedStatus =
-        normalizeStatus(
-          status
-        )
-    }
-
-    const courses =
-      await sql`
-        SELECT
-          course.id,
-
-          course.name,
-
-          course.description,
-
-          course.weekday,
-
-          course.start_time,
-
-          course.end_time,
-
-          course.sessions_per_cycle,
-
-          course.price_per_cycle,
-
-          course.status,
-
-          course.created_at,
-
-          course.updated_at,
-
-          (
-            SELECT
-              COUNT(*)::INTEGER
-
-            FROM
-              student_enrollments enrollment
-
-            WHERE
-              enrollment.course_id =
-                course.id
-
-              AND
-                enrollment.status =
-                  'ACTIVE'
-          )
-            AS active_student_count,
-
-          (
-            SELECT
-              COUNT(*)::INTEGER
-
-            FROM
-              student_packages package
-
-            WHERE
-              package.course_id =
-                course.id
-
-              AND
-                package.status =
-                  'ACTIVE'
-          )
-            AS active_package_count
-
-        FROM
-          dance_courses course
-
-        WHERE
-          (
-            ${normalizedStatus}::text
-              IS NULL
-
-            OR
-              course.status =
-                ${normalizedStatus}
-          )
-
-        ORDER BY
-          CASE
-            WHEN
-              course.status =
-                'ACTIVE'
-            THEN
-              0
-
-            ELSE
-              1
-          END,
-
-          course.weekday ASC NULLS LAST,
-
-          course.start_time ASC NULLS LAST,
-
-          course.name ASC
-      `
-
-    return courses
-  }
-
-// ============================================================
-// Get One Course
-// ============================================================
-
-export const getCourseById =
+const requireCourse =
   async (
-    courseId
+    sql,
+    courseId,
   ) => {
-    const normalizedId =
-      assertUuid(
+    const normalizedCourseId =
+      normalizeUuid(
         courseId,
-        'Course ID'
+        'Course ID',
       )
-
-    const sql =
-      useDatabase()
 
     const rows =
       await sql`
         SELECT
           id,
+          organization_id,
           name,
           description,
           weekday,
@@ -434,7 +265,7 @@ export const getCourseById =
 
         WHERE
           id =
-            ${normalizedId}
+            ${normalizedCourseId}
 
         LIMIT 1
       `
@@ -444,7 +275,6 @@ export const getCourseById =
     ) {
       throw createError({
         statusCode: 404,
-
         statusMessage:
           '找不到課堂',
       })
@@ -454,72 +284,129 @@ export const getCourseById =
   }
 
 // ============================================================
+// List Courses
+// ============================================================
+
+export const getCourses =
+  async () => {
+    const sql =
+      useDatabase()
+
+    const rows =
+      await sql`
+        SELECT
+          id,
+          organization_id,
+          name,
+          description,
+          weekday,
+          start_time,
+          end_time,
+          sessions_per_cycle,
+          price_per_cycle,
+          status,
+          created_at,
+          updated_at
+
+        FROM
+          dance_courses
+
+        ORDER BY
+          CASE
+            WHEN status = 'ACTIVE'
+            THEN 0
+            ELSE 1
+          END,
+
+          weekday ASC NULLS LAST,
+          start_time ASC NULLS LAST,
+          LOWER(name) ASC
+      `
+
+    return rows
+  }
+
+// ============================================================
 // Create Course
+//
+// 這裡就是這次問題的重點。
+// 新增時必須一次 INSERT：
+//
+// name
+// weekday
+// start_time
+// end_time
+// sessions_per_cycle
+// price_per_cycle
+//
+// 不能只寫 name。
 // ============================================================
 
 export const createCourse =
   async ({
     name,
-
-    description = null,
-
     weekday,
-
     startTime,
-
     endTime,
-
     sessionsPerCycle,
-
     pricePerCycle,
+    actorUserId,
+    auditMetadata = {},
   }) => {
     const normalizedName =
       normalizeName(
-        name
-      )
-
-    const normalizedDescription =
-      normalizeDescription(
-        description
+        name,
       )
 
     const normalizedWeekday =
       normalizeWeekday(
-        weekday
+        weekday,
       )
 
     const normalizedStartTime =
       normalizeTime(
         startTime,
-        '開始時間'
+        '開始時間',
       )
 
     const normalizedEndTime =
       normalizeTime(
         endTime,
-        '結束時間'
+        '結束時間',
       )
 
-    validateTimeRange(
-      normalizedStartTime,
+    if (
+      normalizedStartTime >=
       normalizedEndTime
-    )
+    ) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          '結束時間必須晚於開始時間',
+      })
+    }
 
     const normalizedSessions =
       normalizeSessionsPerCycle(
-        sessionsPerCycle
+        sessionsPerCycle,
       )
 
     const normalizedPrice =
       normalizePricePerCycle(
-        pricePerCycle
+        pricePerCycle,
+      )
+
+    const normalizedActorUserId =
+      normalizeUuid(
+        actorUserId,
+        'Actor User ID',
       )
 
     const sql =
       useDatabase()
 
     // ========================================================
-    // 同名稱 + 星期 + 時間避免重複
+    // Prevent exact duplicate slot
     // ========================================================
 
     const duplicates =
@@ -542,7 +429,11 @@ export const createCourse =
 
           AND
             start_time =
-              ${normalizedStartTime}
+              ${normalizedStartTime}::time
+
+          AND
+            end_time =
+              ${normalizedEndTime}::time
 
           AND
             status =
@@ -556,71 +447,142 @@ export const createCourse =
     ) {
       throw createError({
         statusCode: 409,
-
         statusMessage:
-          '已存在相同名稱、星期與時間的課堂',
+          '已經有相同名稱、星期與時間的課堂',
       })
     }
 
-    const id =
+    const courseId =
       randomUUID()
 
-    const rows =
-      await sql`
+    const afterData = {
+      id:
+        courseId,
+
+      name:
+        normalizedName,
+
+      weekday:
+        normalizedWeekday,
+
+      start_time:
+        normalizedStartTime,
+
+      end_time:
+        normalizedEndTime,
+
+      sessions_per_cycle:
+        normalizedSessions,
+
+      price_per_cycle:
+        normalizedPrice,
+
+      status:
+        'ACTIVE',
+    }
+
+    const queries = [
+      sql`
         INSERT INTO
           dance_courses (
             id,
-
             name,
-
             description,
-
             weekday,
-
             start_time,
-
             end_time,
-
             sessions_per_cycle,
-
             price_per_cycle,
-
             status,
-
             created_at,
-
             updated_at
           )
 
         VALUES (
-          ${id},
-
+          ${courseId},
           ${normalizedName},
-
-          ${normalizedDescription},
-
+          NULL,
           ${normalizedWeekday},
-
-          ${normalizedStartTime},
-
-          ${normalizedEndTime},
-
+          ${normalizedStartTime}::time,
+          ${normalizedEndTime}::time,
           ${normalizedSessions},
-
           ${normalizedPrice},
-
           'ACTIVE',
-
           NOW(),
-
           NOW()
         )
 
         RETURNING
-          *
-      `
+          id,
+          organization_id,
+          name,
+          description,
+          weekday,
+          start_time,
+          end_time,
+          sessions_per_cycle,
+          price_per_cycle,
+          status,
+          created_at,
+          updated_at
+      `,
 
-    return rows[0]
+      createAuditQuery(
+        sql,
+        {
+          actorUserId:
+            normalizedActorUserId,
+
+          actorRole:
+            'TEACHER',
+
+          action:
+            'CREATE',
+
+          entityType:
+            'COURSE',
+
+          entityId:
+            courseId,
+
+          studentId:
+            null,
+
+          courseId,
+
+          beforeData:
+            null,
+
+          afterData,
+
+          note:
+            `新增課堂「${normalizedName}」：星期 ${normalizedWeekday}，${normalizedStartTime}–${normalizedEndTime}，${normalizedSessions} 堂 / ${normalizedPrice}`,
+
+          ...auditMetadata,
+        },
+      ),
+    ]
+
+    if (
+      typeof sql.transaction !==
+      'function'
+    ) {
+      throw createError({
+        statusCode: 500,
+        statusMessage:
+          '資料庫目前不支援 Transaction',
+      })
+    }
+
+    const results =
+      await sql.transaction(
+        queries,
+      )
+
+    return (
+      results[0]?.[0] ||
+      null
+    )
   }
 
 // ============================================================
@@ -630,154 +592,349 @@ export const createCourse =
 export const updateCourse =
   async ({
     courseId,
-
     name,
-
-    description,
-
     weekday,
-
     startTime,
-
     endTime,
-
     sessionsPerCycle,
-
     pricePerCycle,
-
     status,
+    actorUserId,
+    auditMetadata = {},
   }) => {
-    const existing =
-      await getCourseById(
-        courseId
+    const normalizedCourseId =
+      normalizeUuid(
+        courseId,
+        'Course ID',
       )
 
-    const normalizedName =
-      name === undefined
-        ? existing.name
-        : normalizeName(
-            name
-          )
-
-    const normalizedDescription =
-      description === undefined
-        ? existing.description
-        : normalizeDescription(
-            description
-          )
-
-    const normalizedWeekday =
-      weekday === undefined
-        ? Number(
-            existing.weekday
-          )
-        : normalizeWeekday(
-            weekday
-          )
-
-    const normalizedStartTime =
-      startTime === undefined
-        ? String(
-            existing.start_time
-          ).slice(
-            0,
-            5
-          )
-        : normalizeTime(
-            startTime,
-            '開始時間'
-          )
-
-    const normalizedEndTime =
-      endTime === undefined
-        ? String(
-            existing.end_time
-          ).slice(
-            0,
-            5
-          )
-        : normalizeTime(
-            endTime,
-            '結束時間'
-          )
-
-    validateTimeRange(
-      normalizedStartTime,
-      normalizedEndTime
-    )
-
-    const normalizedSessions =
-      sessionsPerCycle ===
-        undefined
-        ? Number(
-            existing
-              .sessions_per_cycle
-          )
-        : normalizeSessionsPerCycle(
-            sessionsPerCycle
-          )
-
-    const normalizedPrice =
-      pricePerCycle ===
-        undefined
-        ? Number(
-            existing
-              .price_per_cycle
-          )
-        : normalizePricePerCycle(
-            pricePerCycle
-          )
-
-    const normalizedStatus =
-      status === undefined
-        ? existing.status
-        : normalizeStatus(
-            status
-          )
+    const normalizedActorUserId =
+      normalizeUuid(
+        actorUserId,
+        'Actor User ID',
+      )
 
     const sql =
       useDatabase()
 
-    const rows =
+    const oldCourse =
+      await requireCourse(
+        sql,
+        normalizedCourseId,
+      )
+
+    // ========================================================
+    // Status-only update
+    // ========================================================
+
+    const statusOnly =
+      status !== undefined &&
+      name === undefined &&
+      weekday === undefined &&
+      startTime === undefined &&
+      endTime === undefined &&
+      sessionsPerCycle === undefined &&
+      pricePerCycle === undefined
+
+    if (
+      statusOnly
+    ) {
+      const normalizedStatus =
+        normalizeStatus(
+          status,
+        )
+
+      const afterData = {
+        ...oldCourse,
+        status:
+          normalizedStatus,
+      }
+
+      const results =
+        await sql.transaction([
+          sql`
+            UPDATE
+              dance_courses
+
+            SET
+              status =
+                ${normalizedStatus},
+
+              updated_at =
+                NOW()
+
+            WHERE
+              id =
+                ${normalizedCourseId}
+
+            RETURNING
+              id,
+              organization_id,
+              name,
+              description,
+              weekday,
+              start_time,
+              end_time,
+              sessions_per_cycle,
+              price_per_cycle,
+              status,
+              created_at,
+              updated_at
+          `,
+
+          createAuditQuery(
+            sql,
+            {
+              actorUserId:
+                normalizedActorUserId,
+
+              actorRole:
+                'TEACHER',
+
+              action:
+                'UPDATE',
+
+              entityType:
+                'COURSE',
+
+              entityId:
+                normalizedCourseId,
+
+              studentId:
+                null,
+
+              courseId:
+                normalizedCourseId,
+
+              beforeData:
+                oldCourse,
+
+              afterData,
+
+              note:
+                `${normalizedStatus === 'ACTIVE' ? '啟用' : '停用'}課堂「${oldCourse.name}」`,
+
+              ...auditMetadata,
+            },
+          ),
+        ])
+
+      return (
+        results[0]?.[0] ||
+        null
+      )
+    }
+
+    // ========================================================
+    // Full edit
+    // ========================================================
+
+    const normalizedName =
+      normalizeName(
+        name,
+      )
+
+    const normalizedWeekday =
+      normalizeWeekday(
+        weekday,
+      )
+
+    const normalizedStartTime =
+      normalizeTime(
+        startTime,
+        '開始時間',
+      )
+
+    const normalizedEndTime =
+      normalizeTime(
+        endTime,
+        '結束時間',
+      )
+
+    if (
+      normalizedStartTime >=
+      normalizedEndTime
+    ) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          '結束時間必須晚於開始時間',
+      })
+    }
+
+    const normalizedSessions =
+      normalizeSessionsPerCycle(
+        sessionsPerCycle,
+      )
+
+    const normalizedPrice =
+      normalizePricePerCycle(
+        pricePerCycle,
+      )
+
+    // ========================================================
+    // Prevent duplicate
+    // ========================================================
+
+    const duplicates =
       await sql`
-        UPDATE
+        SELECT
+          id
+
+        FROM
           dance_courses
 
-        SET
-          name =
-            ${normalizedName},
-
-          description =
-            ${normalizedDescription},
-
-          weekday =
-            ${normalizedWeekday},
-
-          start_time =
-            ${normalizedStartTime},
-
-          end_time =
-            ${normalizedEndTime},
-
-          sessions_per_cycle =
-            ${normalizedSessions},
-
-          price_per_cycle =
-            ${normalizedPrice},
-
-          status =
-            ${normalizedStatus},
-
-          updated_at =
-            NOW()
-
         WHERE
-          id =
-            ${courseId}
+          id <>
+            ${normalizedCourseId}
 
-        RETURNING
-          *
+          AND
+            LOWER(name) =
+              LOWER(
+                ${normalizedName}
+              )
+
+          AND
+            weekday =
+              ${normalizedWeekday}
+
+          AND
+            start_time =
+              ${normalizedStartTime}::time
+
+          AND
+            end_time =
+              ${normalizedEndTime}::time
+
+          AND
+            status =
+              'ACTIVE'
+
+        LIMIT 1
       `
 
-    return rows[0]
+    if (
+      duplicates.length
+    ) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          '已經有相同名稱、星期與時間的課堂',
+      })
+    }
+
+    const afterData = {
+      id:
+        normalizedCourseId,
+
+      name:
+        normalizedName,
+
+      weekday:
+        normalizedWeekday,
+
+      start_time:
+        normalizedStartTime,
+
+      end_time:
+        normalizedEndTime,
+
+      sessions_per_cycle:
+        normalizedSessions,
+
+      price_per_cycle:
+        normalizedPrice,
+
+      status:
+        oldCourse.status,
+    }
+
+    const results =
+      await sql.transaction([
+        sql`
+          UPDATE
+            dance_courses
+
+          SET
+            name =
+              ${normalizedName},
+
+            weekday =
+              ${normalizedWeekday},
+
+            start_time =
+              ${normalizedStartTime}::time,
+
+            end_time =
+              ${normalizedEndTime}::time,
+
+            sessions_per_cycle =
+              ${normalizedSessions},
+
+            price_per_cycle =
+              ${normalizedPrice},
+
+            updated_at =
+              NOW()
+
+          WHERE
+            id =
+              ${normalizedCourseId}
+
+          RETURNING
+            id,
+            organization_id,
+            name,
+            description,
+            weekday,
+            start_time,
+            end_time,
+            sessions_per_cycle,
+            price_per_cycle,
+            status,
+            created_at,
+            updated_at
+        `,
+
+        createAuditQuery(
+          sql,
+          {
+            actorUserId:
+              normalizedActorUserId,
+
+            actorRole:
+              'TEACHER',
+
+            action:
+              'UPDATE',
+
+            entityType:
+              'COURSE',
+
+            entityId:
+              normalizedCourseId,
+
+            studentId:
+              null,
+
+            courseId:
+              normalizedCourseId,
+
+            beforeData:
+              oldCourse,
+
+            afterData,
+
+            note:
+              `修改課堂「${normalizedName}」：星期 ${normalizedWeekday}，${normalizedStartTime}–${normalizedEndTime}，${normalizedSessions} 堂 / ${normalizedPrice}`,
+
+            ...auditMetadata,
+          },
+        ),
+      ])
+
+    return (
+      results[0]?.[0] ||
+      null
+    )
   }

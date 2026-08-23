@@ -3,25 +3,30 @@ import {
 } from '../../../utils/authSession.js'
 
 import {
+  getAuditRequestMetadata,
+} from '../../../services/auditService.js'
+
+import {
   createCourse,
   getCourses,
   updateCourse,
 } from '../../../services/courseService.js'
 
+// ============================================================
+// Handler
+// ============================================================
+
 export default defineEventHandler(
   async (
-    event
+    event,
   ) => {
     // ========================================================
-    // Auth
-    //
-    // 系統只有一位老師。
-    // 不需要 Organization Membership。
+    // Teacher Auth
     // ========================================================
 
     const user =
       await requireAuth(
-        event
+        event,
       )
 
     if (
@@ -30,7 +35,6 @@ export default defineEventHandler(
     ) {
       throw createError({
         statusCode: 403,
-
         statusMessage:
           '只有老師可以管理課堂',
       })
@@ -39,7 +43,7 @@ export default defineEventHandler(
     const method =
       String(
         event.method ||
-        'GET'
+        'GET',
       ).toUpperCase()
 
     // ========================================================
@@ -50,27 +54,19 @@ export default defineEventHandler(
       method ===
       'GET'
     ) {
-      const query =
-        getQuery(
-          event
-        )
-
       const courses =
-        await getCourses({
-          status:
-            query.status ||
-            null,
-        })
+        await getCourses()
 
       return {
         success: true,
-
         courses,
       }
     }
 
     // ========================================================
     // POST
+    //
+    // 新增時一定完整傳六個欄位。
     // ========================================================
 
     if (
@@ -79,16 +75,18 @@ export default defineEventHandler(
     ) {
       const body =
         await readBody(
-          event
+          event,
+        )
+
+      const auditMetadata =
+        getAuditRequestMetadata(
+          event,
         )
 
       const course =
         await createCourse({
           name:
             body?.name,
-
-          description:
-            body?.description,
 
           weekday:
             body?.weekday,
@@ -104,13 +102,18 @@ export default defineEventHandler(
 
           pricePerCycle:
             body?.pricePerCycle,
+
+          actorUserId:
+            user.id,
+
+          auditMetadata,
         })
 
       return {
         success: true,
 
         message:
-          '課堂建立完成',
+          '課堂已新增',
 
         course,
       }
@@ -126,13 +129,13 @@ export default defineEventHandler(
     ) {
       const body =
         await readBody(
-          event
+          event,
         )
 
       const courseId =
         String(
           body?.courseId ||
-          ''
+          '',
         ).trim()
 
       if (
@@ -140,11 +143,15 @@ export default defineEventHandler(
       ) {
         throw createError({
           statusCode: 400,
-
           statusMessage:
             '缺少 Course ID',
         })
       }
+
+      const auditMetadata =
+        getAuditRequestMetadata(
+          event,
+        )
 
       const course =
         await updateCourse({
@@ -152,9 +159,6 @@ export default defineEventHandler(
 
           name:
             body?.name,
-
-          description:
-            body?.description,
 
           weekday:
             body?.weekday,
@@ -173,32 +177,40 @@ export default defineEventHandler(
 
           status:
             body?.status,
+
+          actorUserId:
+            user.id,
+
+          auditMetadata,
         })
 
       return {
         success: true,
 
         message:
-          '課堂資料已更新',
+          body?.status &&
+          body?.name ===
+            undefined
+            ? (
+                body.status ===
+                'ACTIVE'
+                  ? '課堂已啟用'
+                  : '課堂已停用'
+              )
+            : '課堂已更新',
 
         course,
       }
     }
 
     // ========================================================
-    // Method Not Allowed
+    // Other
     // ========================================================
 
-    setResponseStatus(
-      event,
-      405
-    )
-
-    return {
-      success: false,
-
-      message:
+    throw createError({
+      statusCode: 405,
+      statusMessage:
         'Method Not Allowed',
-    }
-  }
+    })
+  },
 )
